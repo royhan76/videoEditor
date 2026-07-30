@@ -1,0 +1,65 @@
+# ─── Video & Media Files ──────────────────────────────────────────────────────
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.flv
+*.wmv
+*.mp3
+*.aac
+*.wav
+*.flac
+
+# ─── Subtitle Generated ───────────────────────────────────────────────────────
+*.ass
+temp/
+
+# ─── Output & Logs ────────────────────────────────────────────────────────────
+output/
+edit_plan/
+render_log.txt
+*.log
+
+# ─── API Key / Config Sensitif ────────────────────────────────────────────────
+# Rename config.json ke config.example.json dan isi api_key dengan placeholder
+# config/config.json  ← uncomment baris ini jika mau hide seluruh config
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# ─── Virtual Environment ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# ─── IDE & OS ─────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Assets upload (optional, uncomment jika assets besar) ───────────────────
+# assets/
