@@ -1,0 +1,41 @@
+{
+    "api": {
+        "provider": "gemini",
+        "api_key": "YOUR_GEMINI_API_KEY_HERE",
+        "model": "gemini-2.0-flash-lite",
+        "max_retries": 3,
+        "retry_delay_s": 10
+    },
+    "audio": {
+        "fade_in": 300,
+        "fade_out": 300,
+        "crossfade": 400
+    },
+    "render": {
+        "codec": "h264_nvenc",
+        "fallback_codec": "libx264",
+        "crf": 23,
+        "preset": "veryfast",
+        "output_format": "mp4"
+    },
+    "subtitle": {
+        "default_preset": "Modern01"
+    },
+    "hook": {
+        "min_duration_sec": 10,
+        "max_duration_sec": 60
+    },
+    "crop": {
+        "enabled": true,
+        "left_pct": 8,
+        "right_pct": 8,
+        "top_pct": 4,
+        "bottom_pct": 10
+    },
+    "paths": {
+        "output_dir": "output",
+        "temp_dir": "temp",
+        "preset_dir": "preset",
+        "edit_plan_dir": "edit_plan"
+    }
+}

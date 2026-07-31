@@ -24,7 +24,7 @@ render_log.txt
 
 # ─── API Key / Config Sensitif ────────────────────────────────────────────────
 # Rename config.json ke config.example.json dan isi api_key dengan placeholder
-.config/config.json  ← uncomment baris ini jika mau hide seluruh config
+config/config.json
 
 # ─── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
