@@ -209,8 +209,8 @@ class MainWindow(QMainWindow):
         left.addStretch()
 
         self._preview = PreviewWidget()
-        split.addLayout(left, 3)
-        split.addWidget(self._preview, 2)
+        split.addWidget(self._preview, 3)
+        split.addLayout(left, 2)
         inner.addLayout(split)
 
         self._preview_debounce = QTimer(self)
