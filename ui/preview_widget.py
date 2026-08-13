@@ -138,8 +138,9 @@ class PreviewWidget(QFrame):
         self._player.setAudioOutput(self._audio)
 
         self._video = QVideoWidget(self)
-        self._video.setMinimumSize(320, 180)
-        self._video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._video.setMinimumSize(480, 270)   # 16:9 min
+        self._video.setMaximumHeight(420)      # batasi tinggi (16:9 max-ish)
+        self._video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._video.setAspectRatioMode(Qt.KeepAspectRatio)
         self._player.setVideoOutput(self._video)
 

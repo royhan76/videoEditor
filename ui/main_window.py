@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
     def _setup_window(self):
         self.setWindowTitle("AI Video Director")
         self.setMinimumSize(980, 680)
-        self.resize(1280, 860)
+        self.resize(1280, 720)
 
     # ─── UI Setup ────────────────────────────────────────────────────────────
 
