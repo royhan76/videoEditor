@@ -96,8 +96,7 @@ class _Overlay(QWidget):
             self.crop.get("bottom_pct", 0),
         )
 
-        dim = QColor(8, 8, 12, 160)
-        # letterbox + cropped margins
+        dim = QColor(8, 8, 12, 140)
         p.fillRect(0, 0, w, vy, dim)
         p.fillRect(0, vy + vh, w, h - (vy + vh), dim)
         p.fillRect(0, vy, vx, vh, dim)
@@ -107,8 +106,9 @@ class _Overlay(QWidget):
         p.fillRect(kx, vy, kw, ky - vy, dim)
         p.fillRect(kx, ky + kh, kw, (vy + vh) - (ky + kh), dim)
 
-        p.setPen(QPen(QColor("#7C6AFF"), 1))
-        p.drawRect(kx, ky, max(kw - 1, 0), max(kh - 1, 0))
+        # Highlight area crop aktual
+        p.setPen(QPen(QColor("#7C6AFF"), 2))
+        p.drawRect(kx, ky, kw, kh)
 
         if self.subtitle_text and kw > 8 and kh > 8:
             p.setPen(QColor("#FFFFFF"))
