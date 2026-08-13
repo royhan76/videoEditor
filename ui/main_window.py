@@ -175,6 +175,12 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
+        # Root horizontal layout: form kiri, video kanan
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Left panel (scrollable)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -184,34 +190,25 @@ class MainWindow(QMainWindow):
         content = QWidget()
         scroll.setWidget(content)
 
-        root = QVBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-        root.addWidget(scroll)
-
         inner = QVBoxLayout(content)
         inner.setContentsMargins(20, 16, 20, 16)
         inner.setSpacing(14)
 
         inner.addWidget(self._build_header())
         inner.addWidget(self._build_separator())
+        inner.addWidget(self._build_input_card())
+        inner.addWidget(self._build_settings_card())
+        inner.addWidget(self._build_add_button())
+        inner.addWidget(self._build_queue_card())
+        inner.addWidget(self._build_progress_card())
+        inner.addStretch()
 
-        split = QHBoxLayout()
-        split.setSpacing(14)
-
-        left = QVBoxLayout()
-        left.setSpacing(14)
-        left.addWidget(self._build_input_card())
-        left.addWidget(self._build_settings_card())
-        left.addWidget(self._build_add_button())
-        left.addWidget(self._build_queue_card())
-        left.addWidget(self._build_progress_card())
-        left.addStretch()
-
+        # Video preview di kanan
         self._preview = PreviewWidget()
-        split.addWidget(self._preview, 3)
-        split.addLayout(left, 2)
-        inner.addLayout(split)
+        self._preview.setMinimumWidth(480)
+
+        root.addWidget(scroll, 1)
+        root.addWidget(self._preview, 2)
 
         self._preview_debounce = QTimer(self)
         self._preview_debounce.setSingleShot(True)
