@@ -21,7 +21,9 @@ from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QIcon, QColor
 
 from ui.styles import MAIN_STYLE
+from ui.preview_widget import PREVIEW_STYLE, PreviewWidget
 from ui.worker import RenderWorker
+from subtitle.extractor import SubtitleExtractor
 from subtitle.preset_loader import PresetLoader
 from config import load_config, get_preset_dir
 from renderer.ffmpeg_renderer import FFmpegRenderer
@@ -158,13 +160,14 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._apply_style()
         self._check_environment()
+        self._wire_preview()
 
     # ─── Window Setup ────────────────────────────────────────────────────────
 
     def _setup_window(self):
         self.setWindowTitle("AI Video Director")
-        self.setMinimumSize(480, 620)
-        self.resize(780, 960)
+        self.setMinimumSize(980, 680)
+        self.resize(1280, 860)
 
     # ─── UI Setup ────────────────────────────────────────────────────────────
 
@@ -192,12 +195,28 @@ class MainWindow(QMainWindow):
 
         inner.addWidget(self._build_header())
         inner.addWidget(self._build_separator())
-        inner.addWidget(self._build_input_card())
-        inner.addWidget(self._build_settings_card())
-        inner.addWidget(self._build_add_button())       # ← Tambah ke antrian
-        inner.addWidget(self._build_queue_card())       # ← Panel antrian
-        inner.addWidget(self._build_progress_card())
-        inner.addStretch()
+
+        split = QHBoxLayout()
+        split.setSpacing(14)
+
+        left = QVBoxLayout()
+        left.setSpacing(14)
+        left.addWidget(self._build_input_card())
+        left.addWidget(self._build_settings_card())
+        left.addWidget(self._build_add_button())
+        left.addWidget(self._build_queue_card())
+        left.addWidget(self._build_progress_card())
+        left.addStretch()
+
+        self._preview = PreviewWidget()
+        split.addLayout(left, 3)
+        split.addWidget(self._preview, 2)
+        inner.addLayout(split)
+
+        self._preview_debounce = QTimer(self)
+        self._preview_debounce.setSingleShot(True)
+        self._preview_debounce.setInterval(250)
+        self._preview_debounce.timeout.connect(self._refresh_preview_overlays)
 
     # ─── Header ──────────────────────────────────────────────────────────────
 
@@ -449,6 +468,7 @@ class MainWindow(QMainWindow):
             spin.setMinimumWidth(60)
 
             self._crop_spins[key] = spin
+            spin.valueChanged.connect(self._schedule_preview_refresh)
             grid.addWidget(lbl,  0, col, Qt.AlignCenter)
             grid.addWidget(spin, 1, col, Qt.AlignCenter)
             grid.setColumnStretch(col, 1)
@@ -593,7 +613,7 @@ class MainWindow(QMainWindow):
     # ─── Apply Style ─────────────────────────────────────────────────────────
 
     def _apply_style(self):
-        self.setStyleSheet(MAIN_STYLE + QUEUE_EXTRA_STYLE)
+        self.setStyleSheet(MAIN_STYLE + QUEUE_EXTRA_STYLE + PREVIEW_STYLE)
 
     # ─── Event: Video selected ────────────────────────────────────────────────
 
@@ -611,6 +631,8 @@ class MainWindow(QMainWindow):
                 f"durasi: {info['duration_ms']/1000:.1f}s"
             )
             self._update_end_time()
+            self._preview.load_video(path, info["width"], info["height"])
+            self._refresh_preview_overlays()
         else:
             self._video_duration_ms = 0
 
@@ -726,6 +748,8 @@ class MainWindow(QMainWindow):
         self._start_edit.clear()
         self._end_edit.clear()
         self._video_duration_ms = 0
+        self._preview.load_video("")
+        self._preview.set_subtitles([])
 
     # ─── Event: Start Queue ───────────────────────────────────────────────────
 
@@ -900,6 +924,37 @@ class MainWindow(QMainWindow):
 
         self._env_badge.style().unpolish(self._env_badge)
         self._env_badge.style().polish(self._env_badge)
+
+    def _wire_preview(self):
+        self._subtitle_edit.textChanged.connect(self._schedule_preview_refresh)
+        self._start_edit.textChanged.connect(self._schedule_preview_refresh)
+
+    def _schedule_preview_refresh(self, *_):
+        self._preview_debounce.start()
+
+    def _refresh_preview_overlays(self):
+        crop = {k: v.value() for k, v in self._crop_spins.items()}
+        self._preview.set_crop(crop)
+        self._preview.set_subtitles(self._preview_entries())
+
+    def _preview_entries(self):
+        sub_path = self._subtitle_edit.text().strip()
+        start = self._start_edit.text().strip()
+        duration = getattr(self, "_video_duration_ms", 0)
+        if not sub_path or not Path(sub_path).exists() or not start or duration <= 0:
+            return []
+        try:
+            extractor = SubtitleExtractor(sub_path)
+            start_ms = timestamp_to_ms(start)
+            end_time = ms_to_timestamp(start_ms + duration)
+            return extractor.shifted_entries(start, end_time)
+        except Exception as e:
+            self._log(f"[PREVIEW] Subtitle skip: {e}")
+            return []
+
+    def closeEvent(self, event):
+        self._preview.shutdown()
+        super().closeEvent(event)
 
 
 # ─── Extra Style untuk Queue ──────────────────────────────────────────────────
