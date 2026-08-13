@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox,
     QCheckBox, QDoubleSpinBox, QFrame, QTextEdit,
     QProgressBar, QFileDialog, QSizePolicy, QGridLayout,
-    QScrollArea, QSpacerItem,
+    QScrollArea, QSpacerItem, QSplitter,
 )
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QIcon, QColor
@@ -175,10 +175,14 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        # Root horizontal layout: form kiri, video kanan
+        # Root horizontal layout: form kiri, video kanan (splitter)
         root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(4)
 
         # Left panel (scrollable)
         scroll = QScrollArea()
@@ -207,8 +211,13 @@ class MainWindow(QMainWindow):
         self._preview = PreviewWidget()
         self._preview.setMinimumWidth(480)
 
-        root.addWidget(scroll, 1)
-        root.addWidget(self._preview, 2)
+        splitter.addWidget(scroll)
+        splitter.addWidget(self._preview)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([480, 800])
+
+        root.addWidget(splitter)
 
         self._preview_debounce = QTimer(self)
         self._preview_debounce.setSingleShot(True)
