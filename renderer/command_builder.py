@@ -107,17 +107,14 @@ class FFmpegCommandBuilder:
             vi  = video_in_idx[i]
             ai  = audio_in_idx[i]
 
-            if seg.label == "intro":
-                # Scale intro ke ukuran pre-crop video utama + normalisasi fps/SAR
-                filter_parts.append(
-                    f"[{vi}:v]setpts=PTS-STARTPTS,"
-                    f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
-                    f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,"
-                    f"setsar=1,"
-                    f"fps=60[v{i}]"
-                )
-            else:
-                filter_parts.append(f"[{vi}:v]setpts=PTS-STARTPTS[v{i}]")
+            # Scale semua segmen ke ukuran pre-crop video utama + normalisasi fps/SAR
+            filter_parts.append(
+                f"[{vi}:v]setpts=PTS-STARTPTS,"
+                f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+                f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,"
+                f"setsar=1,"
+                f"fps=60[v{i}]"
+            )
 
             # Audio
             audio_chain = f"[{ai}:a]asetpts=PTS-STARTPTS"
@@ -190,16 +187,44 @@ class FFmpegCommandBuilder:
             n = len(segments)
 
             cmd = ["ffmpeg", "-y"]
-            for seg in segments:
+            video_in_idx = {}
+            audio_in_idx = {}
+            cur_idx = 0
+
+            for i, seg in enumerate(segments):
                 ss  = seg.start_ms / 1000
                 dur = seg.duration_ms / 1000
                 src = intro_path if (seg.label == "intro" and intro_path) else video_path
                 cmd += ["-ss", f"{ss:.3f}", "-t", f"{dur:.3f}", "-i", src]
+                video_in_idx[i] = cur_idx
+                if seg.has_audio:
+                    audio_in_idx[i] = cur_idx
+                cur_idx += 1
+
+                if not seg.has_audio:
+                    cmd += [
+                        "-f", "lavfi",
+                        "-t", f"{dur:.3f}",
+                        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                    ]
+                    audio_in_idx[i] = cur_idx
+                    cur_idx += 1
+
+            src_w = crop.src_width  if crop.src_width  > 0 else (crop.width if crop.width > 0 else 1920)
+            src_h = crop.src_height if crop.src_height > 0 else (crop.height if crop.height > 0 else 1080)
 
             filter_parts = []
             for i, seg in enumerate(segments):
-                filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
-                filter_parts.append(f"[{i}:a]asetpts=PTS-STARTPTS[a{i}]")
+                vi = video_in_idx[i]
+                ai = audio_in_idx[i]
+                filter_parts.append(
+                    f"[{vi}:v]setpts=PTS-STARTPTS,"
+                    f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,"
+                    f"setsar=1,"
+                    f"fps=60[v{i}]"
+                )
+                filter_parts.append(f"[{ai}:a]asetpts=PTS-STARTPTS[a{i}]")
 
             concat_in = "".join(f"[v{i}][a{i}]" for i in range(n))
             filter_parts.append(f"{concat_in}concat=n={n}:v=1:a=1[vcat][acat]")

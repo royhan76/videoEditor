@@ -130,53 +130,40 @@ class FFmpegRenderer:
         entries: List[SubtitleEntry],
     ) -> List[SubtitleEntry]:
         """
-        Remap timing subtitle dari waktu clip ke waktu final video.
-
-        Jika tidak ada hook, timing tidak berubah.
-
-        Dengan hook (contoh: hook=7s→27s, body_start=0→7s, body_end=27s→45s):
-            Final video order: [hook 0-20s] [body_start 20-27s] [body_end 27-45s]
-
-            Hook subtitle     : new_time = clip_time - hook_start_ms
-            Body_start sub    : new_time = clip_time + hook_duration_ms
-            Body_end sub      : new_time = clip_time (tidak berubah!)
+        Remap timing subtitle dari waktu clip ke waktu final video secara dinamis
+        berdasarkan segmen-segmen di timeline.
         """
-        if not timeline.has_hook:
-            return entries
-
-        # Cari segmen hook dari timeline
-        hook_seg = next((s for s in timeline.segments if s.label == "hook"), None)
-        if hook_seg is None:
-            return entries
-
-        hook_start_ms = hook_seg.start_ms
-        hook_end_ms   = hook_seg.end_ms
-        hook_duration = hook_end_ms - hook_start_ms
+        # Hitung start time tiap segmen di video final
+        segment_mappings = []
+        current_final_ms = 0
+        for seg in timeline.segments:
+            segment_mappings.append((seg, current_final_ms))
+            current_final_ms += seg.duration_ms
 
         remapped = []
         for entry in entries:
             s, e = entry.start_ms, entry.end_ms
 
-            if s >= hook_start_ms and e <= hook_end_ms:
-                # Dalam hook → pindah ke depan
-                new_s = s - hook_start_ms
-                new_e = e - hook_start_ms
+            matched_seg = None
+            matched_final_start = 0
+            for seg, f_start in segment_mappings:
+                if seg.label == "intro":
+                    continue
+                # Cek apakah timing subtitle sepenuhnya berada di dalam segmen sumber asli
+                if s >= seg.start_ms and e <= seg.end_ms:
+                    matched_seg = seg
+                    matched_final_start = f_start
+                    break
 
-            elif e <= hook_start_ms:
-                # Sebelum hook (body_start) → geser ke belakang hook
-                new_s = s + hook_duration
-                new_e = e + hook_duration
-
-            elif s >= hook_end_ms:
-                # Setelah hook (body_end) → timing tidak berubah
-                # (body_end position = hook_duration + hook_start_ms = hook_end_ms)
-                new_s = s
-                new_e = e
-
-            else:
-                # Overlapping → skip (subtitle terpotong di tengah hook boundary)
-                logger.debug(f"Subtitle overlapping hook boundary — dilewati: {ms_to_timestamp(s)}")
+            if matched_seg is None:
+                logger.debug(
+                    f"Subtitle overlapping segment boundary atau di luar bounds — dilewati: {ms_to_timestamp(s)}"
+                )
                 continue
+
+            # Remap: offset relatif terhadap segmen asal + start_time segmen tersebut di final video
+            new_s = (s - matched_seg.start_ms) + matched_final_start
+            new_e = (e - matched_seg.start_ms) + matched_final_start
 
             remapped.append(SubtitleEntry(
                 index    = entry.index,

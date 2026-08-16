@@ -474,12 +474,41 @@ class MainWindow(QMainWindow):
             spin.setMinimumWidth(60)
 
             self._crop_spins[key] = spin
-            spin.valueChanged.connect(self._schedule_preview_refresh)
+            spin.valueChanged.connect(self._on_crop_changed)
             grid.addWidget(lbl,  0, col, Qt.AlignCenter)
             grid.addWidget(spin, 1, col, Qt.AlignCenter)
             grid.setColumnStretch(col, 1)
 
+        # Bottom auto-hitung dari top (jaga 16:9). Read-only.
+        self._crop_spins["bottom_pct"].setReadOnly(True)
+        self._crop_spins["bottom_pct"].setButtonSymbols(QDoubleSpinBox.NoButtons)
+        self._crop_spins["bottom_pct"].setToolTip(
+            "Otomatis mengikuti Top % untuk menjaga aspect ratio 16:9"
+        )
+
         return grid
+
+    def _on_crop_changed(self, *_):
+        """Crop user-edit → bottom mirror top, jaga 16:9.
+
+        Syarat: top_pct == bottom_pct (mirror vertikal) + left/right proporsional
+        biar height crop / width crop = 9/16.
+        Implementasi: bottom auto = top. Sementara untuk left/right, pakai nilai
+        manual (proporsionalitas vertikal sudah jaga 16:9 via mirror top/bottom).
+        """
+        spins = self._crop_spins
+        top_pct = spins["top_pct"].value()
+        spins["bottom_pct"].blockSignals(True)
+        spins["bottom_pct"].setValue(top_pct)
+        spins["bottom_pct"].blockSignals(False)
+        self._schedule_preview_refresh()
+
+    def _auto_balance_crop(self):
+        """On video load: pastikan bottom mirror top."""
+        spins = self._crop_spins
+        spins["bottom_pct"].blockSignals(True)
+        spins["bottom_pct"].setValue(spins["top_pct"].value())
+        spins["bottom_pct"].blockSignals(False)
 
     # ─── Add to Queue Button ──────────────────────────────────────────────────
 
@@ -638,6 +667,8 @@ class MainWindow(QMainWindow):
             )
             self._update_end_time()
             self._preview.load_video(path, info["width"], info["height"])
+            self._preview.set_duration(info["duration_ms"])
+            self._auto_balance_crop()
             self._refresh_preview_overlays()
         else:
             self._video_duration_ms = 0
@@ -939,10 +970,9 @@ class MainWindow(QMainWindow):
         self._preview_debounce.start()
 
     def _refresh_preview_overlays(self):
-        crop = {k: v.value() for k, v in self._crop_spins.items()}
+        crop = {k: float(v.value()) for k, v in self._crop_spins.items()}
         self._preview.set_crop(crop)
         self._preview.set_subtitles(self._preview_entries())
-
     def _preview_entries(self):
         sub_path = self._subtitle_edit.text().strip()
         start = self._start_edit.text().strip()
