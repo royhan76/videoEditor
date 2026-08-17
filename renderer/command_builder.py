@@ -118,6 +118,12 @@ class FFmpegCommandBuilder:
 
             # Audio
             audio_chain = f"[{ai}:a]asetpts=PTS-STARTPTS"
+            
+            # Anti-Copyright Masking
+            if audio.masking_enabled:
+                mask_filter = self._build_audio_masking_filter(audio)
+                audio_chain += f",{mask_filter}"
+
             fades = []
             if fi > 0:
                 fades.append(f"afade=t=in:st=0:d={fi:.3f}")
@@ -224,7 +230,13 @@ class FFmpegCommandBuilder:
                     f"setsar=1,"
                     f"fps=60[v{i}]"
                 )
-                filter_parts.append(f"[{ai}:a]asetpts=PTS-STARTPTS[a{i}]")
+                
+                audio_chain = f"[{ai}:a]asetpts=PTS-STARTPTS"
+                if timeline.audio.masking_enabled:
+                    mask_filter = self._build_audio_masking_filter(timeline.audio)
+                    audio_chain += f",{mask_filter}"
+                
+                filter_parts.append(f"{audio_chain}[a{i}]")
 
             concat_in = "".join(f"[v{i}][a{i}]" for i in range(n))
             filter_parts.append(f"{concat_in}concat=n={n}:v=1:a=1[vcat][acat]")
@@ -249,11 +261,12 @@ class FFmpegCommandBuilder:
             return cmd
 
         else:
-            # ── Tidak ada intro: single input, audio copy ────────────────────
+            # ── Tidak ada intro: single input ──────────────────────────────
             filter_parts = []
             filter_parts.append(
                 f"[0:v]crop=w={crop.width}:h={crop.height}:x={crop.x}:y={crop.y}[vcrop]"
             )
+
             if ass_path and Path(ass_path).exists():
                 escaped = self._escape_ass_path(ass_path)
                 filter_parts.append(f"[vcrop]ass='{escaped}'[vout]")
@@ -261,14 +274,26 @@ class FFmpegCommandBuilder:
             else:
                 video_map = "[vcrop]"
 
+            # Audio stream: masking if enabled, else copy
+            if timeline.audio.masking_enabled:
+                mask_filter = self._build_audio_masking_filter(timeline.audio)
+                filter_parts.append(
+                    f"[0:a]asetpts=PTS-STARTPTS,{mask_filter}[amasked]"
+                )
+                audio_map = "[amasked]"
+                audio_codec = ["-c:a", "aac", "-b:a", "192k"]
+            else:
+                audio_map = "0:a"
+                audio_codec = ["-c:a", "copy"]
+
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
                 "-filter_complex", ";\n".join(filter_parts),
                 "-map", video_map,
-                "-map", "0:a",
-                "-c:a", "copy",
+                "-map", audio_map,
             ]
+            cmd += audio_codec
             cmd += self._encode_flags(out)
             cmd.append(output_path)
             return cmd
@@ -341,3 +366,30 @@ class FFmpegCommandBuilder:
                     parts.append(arg)
                 i += 1
         return " \\\n  ".join(parts)
+
+    def _build_audio_masking_filter(self, audio) -> str:
+        """
+        Build complex audio filter chain based on masking intensity.
+        Intensity 0.0 (low) to 1.0 (high).
+
+        Uses aecho + rubberband (tempo + pitch). Avoids vibrato/asetrate
+        which cause NaN errors with AAC encoder on some FFmpeg builds.
+        """
+        intensity = audio.masking_intensity
+
+        # 1. Echo: subtle at low intensity, muddy at high.
+        # aecho=in_gain:out_gain:delay:decay
+        delay_ms = 20 + (intensity * 30)  # 20ms to 50ms
+        delay = delay_ms / 1000.0  # convert milliseconds to seconds
+        decay = 0.1 + (intensity * 0.3) # 0.1 to 0.4
+        echo = f"aecho=0.8:0.88:{delay:.3f}:{decay:.2f}"
+
+        # 2. Pitch/tempo nudge via rubberband (tempo + pitch).
+        # rubberband=tempo=X:pitch=Y
+        #   tempo<1 slows slightly + pitch lowers → thickens, evades fingerprint
+        tempo_mult = 1.0 - (0.005 * intensity)  # 1.0 to 0.995
+        pitch_mult = 1.0 - (0.005 * intensity)  # 1.0 to 0.995
+        rubber = f"rubberband=tempo={tempo_mult:.3f}:pitch={pitch_mult:.3f}"
+
+        return f"{echo},{rubber}"
+

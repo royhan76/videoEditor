@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox,
     QCheckBox, QDoubleSpinBox, QFrame, QTextEdit,
     QProgressBar, QFileDialog, QSizePolicy, QGridLayout,
-    QScrollArea, QSpacerItem, QSplitter,
+    QScrollArea, QSpacerItem, QSplitter, QSlider, QSpinBox,
 )
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QIcon, QColor
@@ -44,6 +44,8 @@ class RenderJob:
     subtitle_preset: str
     auto_hook: bool
     crop_settings: dict
+    masking_enabled: bool = False
+    masking_intensity: float = 0.5
     # Status: "pending" | "running" | "done" | "failed"
     status: str = "pending"
     output_path: str = ""
@@ -426,6 +428,8 @@ class MainWindow(QMainWindow):
 
         lay.addLayout(row1)
         lay.addWidget(self._build_separator())
+        lay.addWidget(self._build_masking_controls())
+        lay.addWidget(self._build_separator())
 
         crop_lbl = QLabel("CROP MARGINS (16:9)")
         crop_lbl.setObjectName("section_label")
@@ -509,6 +513,75 @@ class MainWindow(QMainWindow):
         spins["bottom_pct"].blockSignals(True)
         spins["bottom_pct"].setValue(spins["top_pct"].value())
         spins["bottom_pct"].blockSignals(False)
+
+    # ─── Audio Masking Controls ─────────────────────────────────────────────
+
+    def _build_masking_controls(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setSpacing(8)
+
+        # Header row
+        hdr = QHBoxLayout()
+        lbl = QLabel("AUDIO MASKING")
+        lbl.setObjectName("section_label")
+        hdr.addWidget(lbl)
+        hdr.addStretch()
+
+        self._masking_check = QCheckBox("Anti-Copyright")
+        self._masking_check.setChecked(False)
+        self._masking_check.setToolTip(
+            "Mask audio untuk menghindari Content ID claims di YouTube. "
+            "Gunakan intensitas rendah agar suara tetap jernih."
+        )
+        hdr.addWidget(self._masking_check)
+
+        lay.addLayout(hdr)
+
+        # Intensity slider
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(8)
+
+        lbl_intensity = QLabel("Intensity")
+        lbl_intensity.setObjectName("field_label")
+        lbl_intensity.setMinimumWidth(70)
+        lbl_intensity.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+        self._masking_slider = QSlider(Qt.Horizontal)
+        self._masking_slider.setRange(1, 10)
+        self._masking_slider.setValue(5)
+        self._masking_slider.setSingleStep(1)
+        self._masking_slider.setEnabled(False)
+        self._masking_slider.setToolTip("Tingkat mask: semakin tinggi, semakin berubah audio")
+
+        self._masking_spin = QSpinBox()
+        self._masking_spin.setRange(1, 10)
+        self._masking_spin.setValue(5)
+        self._masking_spin.setSuffix("/10")
+        self._masking_spin.setMinimumWidth(50)
+        self._masking_spin.setEnabled(False)
+
+        slider_row.addWidget(lbl_intensity)
+        slider_row.addWidget(self._masking_slider)
+        slider_row.addWidget(self._masking_spin)
+
+        lay.addLayout(slider_row)
+
+        # Connect checkbox to slider enable/disable
+        self._masking_check.toggled.connect(self._masking_slider.setEnabled)
+        self._masking_check.toggled.connect(self._masking_spin.setEnabled)
+        self._masking_slider.valueChanged.connect(self._masking_spin.setValue)
+        self._masking_spin.valueChanged.connect(self._masking_slider.setValue)
+
+        # Update preview widget when masking checkbox changes
+        self._masking_check.toggled.connect(
+            lambda: self._preview.set_masking(
+                self._masking_check.isChecked(),
+                self._masking_spin.value() / 10.0
+            ) if hasattr(self, '_preview') and self._preview else None
+        )
+
+        return w
 
     # ─── Add to Queue Button ──────────────────────────────────────────────────
 
@@ -669,6 +742,11 @@ class MainWindow(QMainWindow):
             self._preview.load_video(path, info["width"], info["height"])
             self._preview.set_duration(info["duration_ms"])
             self._auto_balance_crop()
+            # Sync masking config to preview widget
+            self._preview.set_masking(
+                self._masking_check.isChecked(),
+                self._masking_spin.value() / 10.0
+            )
             self._refresh_preview_overlays()
         else:
             self._video_duration_ms = 0
@@ -722,6 +800,8 @@ class MainWindow(QMainWindow):
             subtitle_preset  = self._style_combo.currentText(),
             auto_hook        = self._hook_check.isChecked(),
             crop_settings    = {k: v.value() for k, v in self._crop_spins.items()},
+            masking_enabled  = self._masking_check.isChecked(),
+            masking_intensity= self._masking_spin.value() / 10.0,
         )
 
         self._queue.append(job)
@@ -868,6 +948,8 @@ class MainWindow(QMainWindow):
             subtitle_preset = job.subtitle_preset,
             auto_hook       = job.auto_hook,
             crop_settings   = job.crop_settings,
+            masking_enabled = job.masking_enabled,
+            masking_intensity= job.masking_intensity,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)

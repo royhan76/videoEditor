@@ -9,7 +9,9 @@
     "audio": {
         "fade_in": 300,
         "fade_out": 300,
-        "crossfade": 400
+        "crossfade": 400,
+        "masking_enabled": false,
+        "masking_intensity": 0.5
     },
     "render": {
         "codec": "h264_nvenc",

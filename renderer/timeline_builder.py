@@ -66,6 +66,8 @@ class AudioInfo:
     fade_in_ms: int
     fade_out_ms: int
     crossfade_ms: int
+    masking_enabled: bool = False
+    masking_intensity: float = 0.5  # 0.0 to 1.0
 
 
 @dataclass
@@ -336,9 +338,11 @@ class TimelineBuilder:
     def _build_audio(self) -> AudioInfo:
         a = self.config.get("audio", {})
         return AudioInfo(
-            fade_in_ms   = a.get("fade_in",   300),
-            fade_out_ms  = a.get("fade_out",  300),
-            crossfade_ms = a.get("crossfade", 400),
+            fade_in_ms      = a.get("fade_in",      300),
+            fade_out_ms     = a.get("fade_out",     300),
+            crossfade_ms    = a.get("crossfade",    400),
+            masking_enabled = a.get("masking_enabled",  False),
+            masking_intensity = a.get("masking_intensity", 0.5),
         )
 
     def _build_output(self, crop: CropInfo) -> OutputInfo:

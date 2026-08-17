@@ -9,13 +9,15 @@ import subprocess
 import threading
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QUrl, Slot, QTimer, QSize
+from PySide6.QtCore import Qt, QUrl, Slot, QTimer, QSize, QStandardPaths
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
-    QSlider, QVBoxLayout, QWidget,
+    QSlider, QVBoxLayout, QWidget, QProgressDialog,
 )
+import tempfile
+import os
 
 from subtitle.extractor import SubtitleEntry
 
@@ -49,6 +51,8 @@ class PreviewWidget(QFrame):
         self._position_ms = 0
         self._duration_ms = 0
         self._user_seek = False
+        self._masking_enabled = False
+        self._masking_intensity = 0.5
 
         # Audio playback via QtMultimedia — sinkron dengan FFmpeg video pipe
         self._audio = QAudioOutput()
@@ -91,12 +95,20 @@ class PreviewWidget(QFrame):
         self._btn_pause.clicked.connect(self.pause)
         self._btn_stop.clicked.connect(self.stop)
 
+        # Anti-copyright audio preview button
+        self._btn_preview_audio = QPushButton("🔊 Preview Audio Mask")
+        self._btn_preview_audio.setObjectName("preview_ctrl_btn")
+        self._btn_preview_audio.setCursor(Qt.PointingHandCursor)
+        self._btn_preview_audio.setEnabled(False)
+        self._btn_preview_audio.clicked.connect(self._on_preview_audio_masked)
+
         controls = QHBoxLayout()
         controls.setSpacing(6)
         controls.addWidget(self._btn_start)
         controls.addWidget(self._btn_play)
         controls.addWidget(self._btn_pause)
         controls.addWidget(self._btn_stop)
+        controls.addWidget(self._btn_preview_audio)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
@@ -370,6 +382,73 @@ class PreviewWidget(QFrame):
         self._duration_ms = ms
         self._slider.setRange(0, max(ms, 0))
         self._update_time(self._position_ms, ms)
+
+    # ─── Audio Masking Preview ──────────────────────────────────────────────
+
+    def set_masking(self, enabled: bool, intensity: float):
+        """Set masking state from outside (called by MainWindow with UI values)."""
+        self._masking_enabled = enabled
+        self._masking_intensity = max(0.0, min(1.0, float(intensity)))
+        # Enable/disable preview button
+        self._btn_preview_audio.setEnabled(enabled and self._video_path is not None)
+
+    def _on_preview_audio_masked(self):
+        """Render 5s audio masking preview to temp file, then play via QMediaPlayer."""
+        if not self._video_path or not self._masking_enabled:
+            return
+        self.stop()  # Henti video preview dulu
+        self._render_masked_audio_preview()
+
+    def _render_masked_audio_preview(self):
+        """Render 5 detik audionya dengan filter masking ke file .wav temp, lalu play."""
+        # Build masking filter string from FFmpegCommandBuilder
+        from renderer.command_builder import FFmpegCommandBuilder
+        builder = FFmpegCommandBuilder()
+        
+        # Buat dummy AudioInfo untuk generate filter
+        from renderer.timeline_builder import AudioInfo
+        dummy_audio = AudioInfo(
+            fade_in_ms=0, fade_out_ms=0, crossfade_ms=0,
+            masking_enabled=True, masking_intensity=self._masking_intensity
+        )
+        mask_filter = builder._build_audio_masking_filter(dummy_audio)
+        
+        # Temp file for rendered audio
+        temp_dir = tempfile.gettempdir()
+        temp_wav = os.path.join(temp_dir, "videoeditor_audio_preview_masked.wav")
+        
+        # FFmpeg command: extract first 5s audio + apply masking filters
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", self._video_path,
+            "-t", "5",  # ambil 5 detik pertama
+            "-af", mask_filter,  # apply masking filter
+            "-ac", "2",
+            "-ar", "44100",
+            temp_wav,
+        ]
+        
+        # Show progress dialog
+        progress = QProgressDialog("Rendering audio preview...", "Batal", 0, 100, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButton(None)
+        progress.setValue(50)
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            progress.close()
+            if result.returncode != 0:
+                self._show_placeholder(f"Audio mask render failed:\n{result.stderr[:200]}")
+                return
+            
+            # Play masked audio
+            self._player.setSource(QUrl.fromLocalFile(temp_wav))
+            self._player.setPlaybackRate(1.0)
+            self._player.play()
+            
+        except Exception as e:
+            progress.close()
+            self._show_placeholder(f"Error: {str(e)[:100]}")
 
 
 PREVIEW_STYLE = """

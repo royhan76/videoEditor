@@ -47,6 +47,8 @@ class RenderWorker(QThread):
         subtitle_preset: str,
         auto_hook: bool,
         crop_settings: dict,
+        masking_enabled: bool = False,
+        masking_intensity: float = 0.5,
     ):
         super().__init__()
         self.video_path       = video_path
@@ -56,6 +58,8 @@ class RenderWorker(QThread):
         self.subtitle_preset  = subtitle_preset
         self.auto_hook        = auto_hook
         self.crop_settings    = crop_settings
+        self.masking_enabled  = masking_enabled
+        self.masking_intensity= masking_intensity
         self._cancelled       = False
 
     def cancel(self):
@@ -76,6 +80,12 @@ class RenderWorker(QThread):
 
         # Override crop settings dari UI
         config["crop"].update(self.crop_settings)
+
+        # Override audio masking settings dari UI
+        config.setdefault("audio", {}).update({
+            "masking_enabled": self.masking_enabled,
+            "masking_intensity": self.masking_intensity,
+        })
 
         output_dir  = get_output_dir()
         temp_dir    = get_temp_dir()
