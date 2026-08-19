@@ -58,6 +58,7 @@ class SubtitleInfo:
     """Informasi subtitle untuk renderer."""
     preset: str
     ass_file: str           # path file .ass yang akan digenerate renderer
+    font_size: int = 0      # 0 = pakai default dari preset
 
 
 @dataclass

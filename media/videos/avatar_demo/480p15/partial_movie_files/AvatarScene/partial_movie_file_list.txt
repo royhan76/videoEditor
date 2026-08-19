@@ -1,0 +1,2 @@
+# This file is used internally by FFMPEG.
+file 'file:E:/PROJECT/desktop/videoEditor/media/videos/avatar_demo/480p15/partial_movie_files/AvatarScene/2118183852_3509578829_4084169668.mp4'

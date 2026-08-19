@@ -7,6 +7,7 @@ Render final pakai renderer/command_builder.py (HD720+).
 
 import subprocess
 import threading
+import re
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QUrl, Slot, QTimer, QSize, QStandardPaths
@@ -53,6 +54,9 @@ class PreviewWidget(QFrame):
         self._user_seek = False
         self._masking_enabled = False
         self._masking_intensity = 0.5
+        self._font_size = 11
+        self._preset_name = "Modern01"
+        self._ass_file = None
 
         # Audio playback via QtMultimedia — sinkron dengan FFmpeg video pipe
         self._audio = QAudioOutput()
@@ -162,6 +166,11 @@ class PreviewWidget(QFrame):
     def set_subtitles(self, entries: List[SubtitleEntry]):
         self._entries = entries or []
         self._sync_subtitle(self._position_ms)
+
+    def set_subtitle_style(self, preset_name: str, font_size: int = 0):
+        """Set subtitle style used for preview (matches render .ass output)."""
+        self._preset_name = preset_name or "Modern01"
+        self._font_size = font_size  # 0 = pakai default preset (sama seperti render)
 
     def start(self):
         if not self._video_path:
@@ -276,6 +285,44 @@ class PreviewWidget(QFrame):
             self._show_placeholder("Crop tidak valid")
             return
 
+        # Build .ass subtitle SAMA seperti render (libass) supaya preview
+        # identik dengan output final.
+        ass_arg = None
+        self._ass_file = None
+        if self._entries:
+            try:
+                from subtitle.preset_loader import PresetLoader
+                from config import get_preset_dir
+                loader = PresetLoader(str(get_preset_dir()))
+                ass_path = os.path.join(
+                    tempfile.gettempdir(), "videoeditor_preview.ass"
+                )
+                loader.build_and_save(
+                    preset_name   = self._preset_name,
+                    entries       = self._entries,
+                    output_path   = ass_path,
+                    output_width  = cw,
+                    output_height = ch,
+                    margin_v      = PresetLoader.calculate_safe_margin(ch, 5),
+                    font_size     = self._font_size if self._font_size else None,
+                )
+                self._ass_file = ass_path
+                # Escape path juga (sama seperti renderer command_builder)
+                p = ass_path.replace("\\", "/")
+                p = re.sub(r"^([A-Za-z]):", r"\1\\:", p).replace("'", "\\'")
+                ass_arg = p
+            except Exception:
+                self._ass_file = None
+
+        # Scale dengan jaga aspect ratio + letterbox, bukan stretch 480:270
+        vf = (
+            f"crop={cw}:{ch}:{cx}:{cy},"
+            f"scale={self.PREVIEW_W}:{self.PREVIEW_H}:force_original_aspect_ratio=decrease,"
+            f"pad={self.PREVIEW_W}:{self.PREVIEW_H}:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+        if ass_arg:
+            vf += f",ass='{ass_arg}'"
+
         cmd = [
             "ffmpeg", "-y",
             "-i", self._video_path,
@@ -283,7 +330,7 @@ class PreviewWidget(QFrame):
         if seek_ms is not None and seek_ms > 0:
             cmd += ["-ss", f"{seek_ms / 1000.0:.3f}"]
         cmd += [
-            "-vf", f"crop={cw}:{ch}:{cx}:{cy},scale={self.PREVIEW_W}:{self.PREVIEW_H}",
+            "-vf", vf,
             "-r", "30",
             "-f", "image2pipe",
             "-vcodec", "rawvideo",
@@ -328,30 +375,10 @@ class PreviewWidget(QFrame):
             self._sync_subtitle(self._position_ms)
 
     def _render_subtitle_overlay(self):
-        """Draw subtitle text onto a copy of current pixmap."""
-        px = self._video.pixmap()
-        if px is None or px.isNull():
-            return
-        img = px.toImage().convertToFormat(QImage.Format_RGB32)
-        p = QPainter()
-        try:
-            if not p.begin(img):
-                return
-            text = self._current_subtitle()
-            if text:
-                pad = 8
-                rect = img.rect().adjusted(0, 0, 0, -pad)
-                p.setPen(QPen(QColor(0, 0, 0, 180)))
-                font = QFont("Segoe UI", 11)
-                font.setBold(True)
-                p.setFont(font)
-                p.drawText(rect.adjusted(1, 1, 1, 1), Qt.AlignHCenter | Qt.AlignBottom | Qt.TextWordWrap, text)
-                p.setPen(QPen(QColor("#FFFFFF")))
-                p.drawText(rect, Qt.AlignHCenter | Qt.AlignBottom | Qt.TextWordWrap, text)
-            p.end()
-        except Exception:
-            return
-        self._video.setPixmap(QPixmap.fromImage(img))
+        """No-op: subtitle sudah dibakar via filter libass di FFmpeg pipe,
+        sama persis dengan render final. Overlay QPainter lama dihapus agar
+        tidak dobel-render dengan gaya beda."""
+        return
 
     def _current_subtitle(self) -> str:
         for e in self._entries:
@@ -361,6 +388,12 @@ class PreviewWidget(QFrame):
 
     def _sync_subtitle(self, pos_ms: int):
         pass  # handled in _render_subtitle_overlay via _current_subtitle
+
+    def _render_subtitle_overlay(self):
+        """No-op: subtitle sudah dibakar via filter libass di FFmpeg pipe,
+        sama persis dengan render final. Overlay QPainter lama dihapus agar
+        tidak dobel-render dengan gaya beda."""
+        return
 
     def _update_time(self, pos: int, dur: int):
         self._time_lbl.setText(f"{_fmt_ms(pos)} / {_fmt_ms(dur)}")

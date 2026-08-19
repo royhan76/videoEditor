@@ -63,6 +63,7 @@ class PresetLoader:
         output_height: int,
         margin_v: Optional[int] = None,
         margin_h: Optional[int] = None,
+        font_size: Optional[int] = None,
     ) -> str:
         """
         Build file .ass lengkap siap untuk FFmpeg.
@@ -74,6 +75,7 @@ class PresetLoader:
             output_height : tinggi video output setelah crop (px)
             margin_v      : override margin vertikal bawah (px) — opsional
             margin_h      : override margin horizontal (px) — opsional
+            font_size     : override ukuran font (px) — opsional
 
         Returns:
             String konten file .ass lengkap
@@ -86,6 +88,10 @@ class PresetLoader:
         # Override margin jika diberikan
         if margin_v is not None or margin_h is not None:
             header = self._override_margin(header, margin_v, margin_h)
+
+        # Override font size jika diberikan
+        if font_size is not None:
+            header = self._override_fontsize(header, font_size)
 
         # Build events section
         events_lines = [
@@ -114,6 +120,7 @@ class PresetLoader:
         output_height: int,
         margin_v: Optional[int] = None,
         margin_h: Optional[int] = None,
+        font_size: Optional[int] = None,
     ) -> str:
         """
         Build .ass dan simpan ke file.
@@ -122,7 +129,7 @@ class PresetLoader:
         content = self.build_ass(
             preset_name, entries,
             output_width, output_height,
-            margin_v, margin_h
+            margin_v, margin_h, font_size
         )
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -227,6 +234,35 @@ class PresetLoader:
                     line = ",".join(parts)
             result.append(line)
         return "\n".join(result)
+
+    def _override_fontsize(self, header: str, fontsize: Optional[int]) -> str:
+        """Override Fontsize field (index 2) pada baris Style: pertama."""
+        if fontsize is None:
+            return header
+        lines = header.splitlines()
+        result = []
+        for line in lines:
+            if line.startswith("Style:"):
+                parts = line.split(",")
+                if len(parts) >= 3:
+                    parts[2] = str(int(fontsize))
+                    line = ",".join(parts)
+            result.append(line)
+        return "\n".join(result)
+
+    def get_style_info(self, preset_name: str) -> dict:
+        """Baca atribut style (Fontsize) dari preset .ass."""
+        path = self._resolve(preset_name)
+        content = path.read_text(encoding="utf-8-sig")
+        for line in content.splitlines():
+            if line.startswith("Style:"):
+                parts = line.split(",")
+                if len(parts) > 2:
+                    try:
+                        return {"fontsize": int(float(parts[2].strip()))}
+                    except Exception:
+                        return {}
+        return {}
 
     @staticmethod
     def _escape_ass(text: str) -> str:

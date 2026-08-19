@@ -47,6 +47,7 @@ class RenderWorker(QThread):
         subtitle_preset: str,
         auto_hook: bool,
         crop_settings: dict,
+        font_size: int = 0,
         masking_enabled: bool = False,
         masking_intensity: float = 0.5,
     ):
@@ -56,6 +57,7 @@ class RenderWorker(QThread):
         self.subtitle_path    = subtitle_path
         self.subtitle_start   = subtitle_start
         self.subtitle_preset  = subtitle_preset
+        self.font_size        = font_size
         self.auto_hook        = auto_hook
         self.crop_settings    = crop_settings
         self.masking_enabled  = masking_enabled
@@ -269,6 +271,10 @@ class RenderWorker(QThread):
         # Override preset dari UI jika user memilih manual
         if self.subtitle_preset:
             timeline.subtitle.preset = self.subtitle_preset
+
+        # Override font size dari UI
+        if self.font_size:
+            timeline.subtitle.font_size = self.font_size
 
         self._log(
             f"[TIMELINE] Segmen: {len(timeline.segments)} | "
