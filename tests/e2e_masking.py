@@ -48,6 +48,9 @@ def main():
         video_src_width=538, video_src_height=268,
         subtitle_ass_path="", )
     timeline.audio = ai
+    timeline.output.codec = "libx264"   # GPU 930MX: nvenc unsupported → fallback manual
+    timeline.output.crf = 23
+    timeline.output.preset = "veryfast"
 
     cmd_builder = FFmpegCommandBuilder()
     outp = tmp / "render-masked.mp4"
