@@ -47,6 +47,8 @@ class RenderJob:
     font_size: int = 0
     masking_enabled: bool = False
     masking_intensity: float = 0.5
+    visual_enabled: bool = False
+    visual_level: int = 5
     # Status: "pending" | "running" | "done" | "failed"
     status: str = "pending"
     output_path: str = ""
@@ -464,6 +466,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_separator())
         lay.addWidget(self._build_masking_controls())
         lay.addWidget(self._build_separator())
+        lay.addWidget(self._build_visual_controls())
+        lay.addWidget(self._build_separator())
 
         crop_lbl = QLabel("CROP MARGINS (16:9)")
         crop_lbl.setObjectName("section_label")
@@ -633,6 +637,65 @@ class MainWindow(QMainWindow):
                 self._masking_spin.value() / 10.0
             ) if hasattr(self, '_preview') and self._preview else None
         )
+
+        return w
+
+    def _build_visual_controls(self) -> QWidget:
+        """Visual treatment (anti-Copyright visual) — crop ekstra + contrast/grain."""
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setSpacing(8)
+
+        hdr = QHBoxLayout()
+        lbl = QLabel("VISUAL TREATMENT")
+        lbl.setObjectName("section_label")
+        hdr.addWidget(lbl)
+        hdr.addStretch()
+
+        self._visual_check = QCheckBox("Anti-Copyright Visual")
+        self._visual_check.setChecked(False)
+        self._visual_check.setToolTip(
+            "Ubah visual video (crop ekstra + kontras + grain) buat hindari "
+            "Content ID claim video/audio-visual di YouTube. Terbukti lepas claim "
+            "PT Digital Rantai Maya (audio visual) di level 5."
+        )
+        hdr.addWidget(self._visual_check)
+
+        lay.addLayout(hdr)
+
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(8)
+
+        lbl_level = QLabel("Level")
+        lbl_level.setObjectName("field_label")
+        lbl_level.setMinimumWidth(70)
+        lbl_level.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+        self._visual_slider = QSlider(Qt.Horizontal)
+        self._visual_slider.setRange(1, 10)
+        self._visual_slider.setValue(5)
+        self._visual_slider.setSingleStep(1)
+        self._visual_slider.setEnabled(False)
+        self._visual_slider.setToolTip("Semakin tinggi, semakin berubah visual (crop makin dalam + grain makin kuat)")
+
+        self._visual_spin = QSpinBox()
+        self._visual_spin.setRange(1, 10)
+        self._visual_spin.setValue(5)
+        self._visual_spin.setSuffix("/10")
+        self._visual_spin.setMinimumWidth(50)
+        self._visual_spin.setEnabled(False)
+
+        slider_row.addWidget(lbl_level)
+        slider_row.addWidget(self._visual_slider)
+        slider_row.addWidget(self._visual_spin)
+
+        lay.addLayout(slider_row)
+
+        # Connect checkbox to slider enable/disable
+        self._visual_check.toggled.connect(self._visual_slider.setEnabled)
+        self._visual_check.toggled.connect(self._visual_spin.setEnabled)
+        self._visual_slider.valueChanged.connect(self._visual_spin.setValue)
+        self._visual_spin.valueChanged.connect(self._visual_slider.setValue)
 
         return w
 
@@ -856,6 +919,8 @@ class MainWindow(QMainWindow):
             crop_settings    = {k: v.value() for k, v in self._crop_spins.items()},
             masking_enabled  = self._masking_check.isChecked(),
             masking_intensity= self._masking_spin.value() / 10.0,
+            visual_enabled   = self._visual_check.isChecked(),
+            visual_level     = self._visual_spin.value(),
         )
 
         self._queue.append(job)
@@ -1005,6 +1070,8 @@ class MainWindow(QMainWindow):
             crop_settings   = job.crop_settings,
             masking_enabled = job.masking_enabled,
             masking_intensity= job.masking_intensity,
+            visual_enabled   = job.visual_enabled,
+            visual_level     = job.visual_level,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)

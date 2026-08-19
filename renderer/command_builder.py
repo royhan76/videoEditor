@@ -147,13 +147,21 @@ class FFmpegCommandBuilder:
             f"[vcat]crop=w={crop.width}:h={crop.height}:x={crop.x}:y={crop.y}[vcrop]"
         )
 
+        # ── 3b. Visual treatment (anti-Copyright visual) ─────────────────────
+        vfx = timeline.visual.vf_suffix(crop.width, crop.height)
+        if vfx:
+            filter_parts.append(f"[vcrop]{vfx}[vfx]")
+            vcrop_out = "[vfx]"
+        else:
+            vcrop_out = "[vcrop]"
+
         # ── 4. Subtitle (ASS) ─────────────────────────────────────────────────
         if ass_path and Path(ass_path).exists():
             escaped = self._escape_ass_path(ass_path)
-            filter_parts.append(f"[vcrop]ass='{escaped}'[vout]")
+            filter_parts.append(f"{vcrop_out}ass='{escaped}'[vout]")
             video_map = "[vout]"
         else:
-            video_map = "[vcrop]"
+            video_map = vcrop_out
 
         # ── 5. Susun sisa command ─────────────────────────────────────────────
         filter_complex = ";\n".join(filter_parts)
@@ -243,13 +251,19 @@ class FFmpegCommandBuilder:
             filter_parts.append(
                 f"[vcat]crop=w={crop.width}:h={crop.height}:x={crop.x}:y={crop.y}[vcrop]"
             )
+            vfx = timeline.visual.vf_suffix(crop.width, crop.height)
+            if vfx:
+                filter_parts.append(f"[vcrop]{vfx}[vfx]")
+                vcrop_out = "[vfx]"
+            else:
+                vcrop_out = "[vcrop]"
 
             if ass_path and Path(ass_path).exists():
                 escaped = self._escape_ass_path(ass_path)
-                filter_parts.append(f"[vcrop]ass='{escaped}'[vout]")
+                filter_parts.append(f"{vcrop_out}ass='{escaped}'[vout]")
                 video_map = "[vout]"
             else:
-                video_map = "[vcrop]"
+                video_map = vcrop_out
 
             cmd += [
                 "-filter_complex", ";\n".join(filter_parts),
@@ -266,13 +280,19 @@ class FFmpegCommandBuilder:
             filter_parts.append(
                 f"[0:v]crop=w={crop.width}:h={crop.height}:x={crop.x}:y={crop.y}[vcrop]"
             )
+            vfx = timeline.visual.vf_suffix(crop.width, crop.height)
+            if vfx:
+                filter_parts.append(f"[vcrop]{vfx}[vfx]")
+                vcrop_out = "[vfx]"
+            else:
+                vcrop_out = "[vcrop]"
 
             if ass_path and Path(ass_path).exists():
                 escaped = self._escape_ass_path(ass_path)
-                filter_parts.append(f"[vcrop]ass='{escaped}'[vout]")
+                filter_parts.append(f"{vcrop_out}ass='{escaped}'[vout]")
                 video_map = "[vout]"
             else:
-                video_map = "[vcrop]"
+                video_map = vcrop_out
 
             # Audio stream: masking if enabled, else copy
             if timeline.audio.masking_enabled:

@@ -13,6 +13,10 @@
         "masking_enabled": false,
         "masking_intensity": 0.5
     },
+    "visual": {
+        "enabled": false,
+        "level": 5
+    },
     "render": {
         "codec": "h264_nvenc",
         "fallback_codec": "libx264",

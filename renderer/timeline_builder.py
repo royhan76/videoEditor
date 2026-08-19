@@ -62,6 +62,55 @@ class SubtitleInfo:
 
 
 @dataclass
+class VisualInfo:
+    """
+    Visual treatment (anti-Copyright visual) — terapkan SETELAH crop.
+
+    Kalibrasi riil di mesin user (video ceramah 380x234):
+      level 5: crop 10% + contrast 6% + sat 6% + noise 5
+        → claim PT DRM "Audio visual" LEPAS total.
+
+    Nilai:
+      enabled : aktif/tidak
+      level   : 0-10
+        - level 0      : tidak ada filter
+        - 1-4          : crop 2-8% + contrast/sat 2-4% (ringan)
+        - 5-7          : crop 10% + contrast/sat 6-8% + noise 5-7 (default 5 = terbukti)
+        - 8-10         : crop 12-15% + contrast/sat 10-12% + noise 8-10 (agresif)
+    """
+    enabled: bool = False
+    level: int = 5
+
+    def vf_suffix(self, src_w: int, src_h: int) -> str:
+        """Return filter string yang ditambahkan SETELAH crop filter.
+
+        Memakai ukuran POST-crop (crop.width/height) sebagai basis, karena
+        filter ini dipasang setelah [vcrop] di chain.
+        """
+        if not self.enabled or self.level <= 0:
+            return ""
+        lvl = self.level
+        # crop %: 2% @ lvl1 → 15% @ lvl10 (dari ukuran post-crop)
+        pct = 0.02 + (lvl - 1) * (0.13 / 9)
+        cw = max(2, int(src_w * (1 - pct)))
+        ch = max(2, int(src_h * (1 - pct)))
+        cx = (src_w - cw) // 2
+        cy = (src_h - ch) // 2
+
+        contrast = 1.0 + lvl * 0.012      # 1.01 → 1.12
+        sat      = 1.0 + lvl * 0.012      # 1.01 → 1.12
+        noise    = max(1, int(2 + lvl * 0.8))  # 3 → 10
+
+        parts = [
+            f"crop={cw}:{ch}:{cx}:{cy}",
+            f"scale={src_w}:{src_h}",
+            f"eq=contrast={contrast:.2f}:saturation={sat:.2f}",
+            f"noise=alls={noise}:allf=t+u",
+        ]
+        return ",".join(parts)
+
+
+@dataclass
 class AudioInfo:
     """Konfigurasi audio fade/crossfade."""
     fade_in_ms: int
@@ -93,6 +142,7 @@ class Timeline:
     subtitle: SubtitleInfo
     audio: AudioInfo
     output: OutputInfo
+    visual: VisualInfo = field(default_factory=VisualInfo)
     has_hook: bool = True
 
     def to_dict(self) -> dict:
@@ -102,6 +152,7 @@ class Timeline:
             "crop": asdict(self.crop),
             "subtitle": asdict(self.subtitle),
             "audio": asdict(self.audio),
+            "visual": asdict(self.visual),
             "output": asdict(self.output),
         }
 
@@ -157,6 +208,7 @@ class TimelineBuilder:
 
         crop    = self._build_crop(video_src_width, video_src_height)
         audio   = self._build_audio()
+        visual  = self._build_visual()
         output  = self._build_output(crop)
         subtitle = SubtitleInfo(
             preset=edit_plan.subtitle.preset,
@@ -178,7 +230,7 @@ class TimelineBuilder:
             segments = self._build_segments_no_hook(video_duration_ms, audio, intro_duration_ms, intro_has_audio)
             return Timeline(
                 segments=segments, crop=crop, subtitle=subtitle,
-                audio=audio, output=output, has_hook=False
+                audio=audio, visual=visual, output=output, has_hook=False
             )
 
         segments = self._build_segments_with_hook(
@@ -193,7 +245,7 @@ class TimelineBuilder:
 
         return Timeline(
             segments=segments, crop=crop, subtitle=subtitle,
-            audio=audio, output=output, has_hook=True
+            audio=audio, visual=visual, output=output, has_hook=True
         )
 
     def build_no_hook(
@@ -213,6 +265,7 @@ class TimelineBuilder:
 
         crop    = self._build_crop(video_src_width, video_src_height)
         audio   = self._build_audio()
+        visual  = self._build_visual()
         output  = self._build_output(crop)
         subtitle = SubtitleInfo(
             preset=edit_plan.subtitle.preset if edit_plan else "Modern01",
@@ -222,7 +275,7 @@ class TimelineBuilder:
 
         return Timeline(
             segments=segments, crop=crop, subtitle=subtitle,
-            audio=audio, output=output, has_hook=False
+            audio=audio, visual=visual, output=output, has_hook=False
         )
 
     # ─── Segment builders ─────────────────────────────────────────────────────────
@@ -335,6 +388,13 @@ class TimelineBuilder:
         )
         return CropInfo(x=cx, y=cy, width=out_w, height=out_h,
                         src_width=src_w, src_height=src_h)
+
+    def _build_visual(self) -> VisualInfo:
+        v = self.config.get("visual", {})
+        return VisualInfo(
+            enabled = v.get("enabled", False),
+            level   = v.get("level", 5),
+        )
 
     def _build_audio(self) -> AudioInfo:
         a = self.config.get("audio", {})
