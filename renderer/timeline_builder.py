@@ -92,10 +92,13 @@ class VisualInfo:
         lvl = self.level
         # crop %: 2% @ lvl1 → 15% @ lvl10 (dari ukuran post-crop)
         pct = 0.02 + (lvl - 1) * (0.13 / 9)
-        cw = max(2, int(src_w * (1 - pct)))
-        ch = max(2, int(src_h * (1 - pct)))
-        cx = (src_w - cw) // 2
-        cy = (src_h - ch) // 2
+        # Force even dimensions — libx264 (dan H.264) reject ganjil, error
+        # "Invalid too big or non positive size". cx/cy juga genap biar crop valid.
+        def _even(v): return v - (v % 2)
+        cw = _even(max(2, min(src_w - 2, int(src_w * (1 - pct)))))
+        ch = _even(max(2, min(src_h - 2, int(src_h * (1 - pct)))))
+        cx = _even(max(0, (src_w - cw) // 2))
+        cy = _even(max(0, (src_h - ch) // 2))
 
         contrast = 1.0 + lvl * 0.012      # 1.01 → 1.12
         sat      = 1.0 + lvl * 0.012      # 1.01 → 1.12

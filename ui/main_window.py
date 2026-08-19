@@ -634,7 +634,7 @@ class MainWindow(QMainWindow):
         self._masking_check.toggled.connect(
             lambda: self._preview.set_masking(
                 self._masking_check.isChecked(),
-                self._masking_spin.value() / 10.0
+                float(self._masking_spin.value())
             ) if hasattr(self, '_preview') and self._preview else None
         )
 
@@ -861,7 +861,7 @@ class MainWindow(QMainWindow):
             # Sync masking config to preview widget
             self._preview.set_masking(
                 self._masking_check.isChecked(),
-                self._masking_spin.value() / 10.0
+                float(self._masking_spin.value())
             )
             self._refresh_preview_overlays()
         else:
@@ -917,10 +917,10 @@ class MainWindow(QMainWindow):
             font_size        = self._font_size_spin.value(),
             auto_hook        = self._hook_check.isChecked(),
             crop_settings    = {k: v.value() for k, v in self._crop_spins.items()},
-            masking_enabled  = self._masking_check.isChecked(),
-            masking_intensity= self._masking_spin.value() / 10.0,
-            visual_enabled   = self._visual_check.isChecked(),
-            visual_level     = self._visual_spin.value(),
+            masking_enabled    = self._masking_check.isChecked(),
+            masking_intensity   = float(self._masking_spin.value()),  # level 1-10 integer scale
+            visual_enabled      = self._visual_check.isChecked(),
+            visual_level        = self._visual_spin.value(),
         )
 
         self._queue.append(job)

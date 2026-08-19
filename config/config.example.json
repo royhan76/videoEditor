@@ -11,7 +11,7 @@
         "fade_out": 300,
         "crossfade": 400,
         "masking_enabled": false,
-        "masking_intensity": 0.5
+        "masking_intensity": 3
     },
     "visual": {
         "enabled": false,
