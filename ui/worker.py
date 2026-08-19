@@ -63,6 +63,7 @@ class RenderWorker(QThread):
         self.auto_hook        = auto_hook
         self.crop_settings    = crop_settings
         self.masking_enabled  = masking_enabled
+        self.masking_intensity = masking_intensity
         self.visual_enabled = visual_enabled
         self.visual_level   = visual_level
         self._cancelled       = False
