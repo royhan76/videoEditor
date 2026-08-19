@@ -44,6 +44,7 @@ class RenderJob:
     subtitle_preset: str
     auto_hook: bool
     crop_settings: dict
+    font_size: int = 0
     masking_enabled: bool = False
     masking_intensity: float = 0.5
     # Status: "pending" | "running" | "done" | "failed"
@@ -403,6 +404,10 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
         row1.setSpacing(8)
 
+        # Subtitle Style with Font Size Spinner
+        style_row = QHBoxLayout()
+        style_row.setSpacing(8)
+
         lbl_style = QLabel("Subtitle Style")
         lbl_style.setObjectName("field_label")
         lbl_style.setMinimumWidth(90)
@@ -414,6 +419,30 @@ class MainWindow(QMainWindow):
         self._populate_presets()
         self._style_combo.setToolTip("Pilih preset tampilan subtitle")
 
+        self._font_size_spin = QSpinBox()
+        self._font_size_spin.setRange(10, 120)
+        self._font_size_spin.setSingleStep(2)
+        self._font_size_spin.setSuffix(" pt")
+        self._font_size_spin.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self._font_size_spin.setToolTip("Custom ukuran font subtitle")
+        self._font_size_spin.valueChanged.connect(self._on_font_size_changed)
+
+        # Load default font size from config
+        sub_cfg = self._config.get("subtitle", {})
+        default_fs = sub_cfg.get("font_size", None)
+        if default_fs:
+            self._font_size_spin.setValue(int(default_fs))
+        else:
+            # Try to extract from current preset
+            try:
+                loader = PresetLoader(str(get_preset_dir()))
+                info = loader.get_style_info(self._style_combo.currentText())
+                if info.get('fontsize'):
+                    self._font_size_spin.setValue(info['fontsize'])
+            except Exception:
+                pass
+        self._custom_font_size = default_fs is not None
+
         self._hook_check = QCheckBox("Auto Hook")
         self._hook_check.setChecked(True)
         self._hook_check.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
@@ -424,8 +453,13 @@ class MainWindow(QMainWindow):
         row1.addWidget(lbl_style)
         row1.addWidget(self._style_combo)
         row1.addSpacing(8)
+        row1.addWidget(QLabel("Font:"))
+        row1.addWidget(self._font_size_spin)
+        row1.addSpacing(8)
         row1.addWidget(self._hook_check)
 
+        # Connect preset change to update font size from new preset
+        self._style_combo.currentIndexChanged.connect(self._on_preset_changed)
         lay.addLayout(row1)
         lay.addWidget(self._build_separator())
         lay.addWidget(self._build_masking_controls())
@@ -494,7 +528,6 @@ class MainWindow(QMainWindow):
 
     def _on_crop_changed(self, *_):
         """Crop user-edit → bottom mirror top, jaga 16:9.
-
         Syarat: top_pct == bottom_pct (mirror vertikal) + left/right proporsional
         biar height crop / width crop = 9/16.
         Implementasi: bottom auto = top. Sementara untuk left/right, pakai nilai
@@ -514,6 +547,25 @@ class MainWindow(QMainWindow):
         spins["bottom_pct"].setValue(spins["top_pct"].value())
         spins["bottom_pct"].blockSignals(False)
 
+    def _on_preset_changed(self, idx: int):
+        """Update font size spinner from newly selected preset (only reset if user hasn't customized)."""
+        if not self._custom_font_size:
+            try:
+                loader = PresetLoader(str(get_preset_dir()))
+                info = loader.get_style_info(self._style_combo.currentText())
+                if info.get("fontsize"):
+                    self._font_size_spin.blockSignals(True)
+                    self._font_size_spin.setValue(info["fontsize"])
+                    self._font_size_spin.blockSignals(False)
+            except Exception:
+                pass
+        self._schedule_preview_refresh()
+
+    def _on_font_size_changed(self, val: int):
+        """User changed font size → mark as custom and refresh preview."""
+        self._custom_font_size = True
+        self._schedule_preview_refresh()
+
     # ─── Audio Masking Controls ─────────────────────────────────────────────
 
     def _build_masking_controls(self) -> QWidget:
@@ -531,8 +583,9 @@ class MainWindow(QMainWindow):
         self._masking_check = QCheckBox("Anti-Copyright")
         self._masking_check.setChecked(False)
         self._masking_check.setToolTip(
-            "Mask audio untuk menghindari Content ID claims di YouTube. "
-            "Gunakan intensitas rendah agar suara tetap jernih."
+            "Ubah audio fingerprint (pitch shift + EQ notch + reverb) buat hindari "
+            "Content ID claim audio di YouTube. Intensitas rendah = suara tetap jernih, "
+            "tinggi = audio berubah lebih drastis. Level 1 aja sudah lolos threshold editstrength."
         )
         hdr.addWidget(self._masking_check)
 
@@ -798,6 +851,7 @@ class MainWindow(QMainWindow):
             subtitle_path    = subtitle_path,
             subtitle_start   = sub_start,
             subtitle_preset  = self._style_combo.currentText(),
+            font_size        = self._font_size_spin.value(),
             auto_hook        = self._hook_check.isChecked(),
             crop_settings    = {k: v.value() for k, v in self._crop_spins.items()},
             masking_enabled  = self._masking_check.isChecked(),
@@ -946,6 +1000,7 @@ class MainWindow(QMainWindow):
             subtitle_path   = job.subtitle_path,
             subtitle_start  = job.subtitle_start,
             subtitle_preset = job.subtitle_preset,
+            font_size       = job.font_size,
             auto_hook       = job.auto_hook,
             crop_settings   = job.crop_settings,
             masking_enabled = job.masking_enabled,
@@ -1054,6 +1109,9 @@ class MainWindow(QMainWindow):
     def _refresh_preview_overlays(self):
         crop = {k: float(v.value()) for k, v in self._crop_spins.items()}
         self._preview.set_crop(crop)
+        self._preview.set_subtitle_style(
+            self._style_combo.currentText(), self._font_size_spin.value()
+        )
         self._preview.set_subtitles(self._preview_entries())
     def _preview_entries(self):
         sub_path = self._subtitle_edit.text().strip()

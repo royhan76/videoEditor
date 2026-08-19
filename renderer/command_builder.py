@@ -370,26 +370,49 @@ class FFmpegCommandBuilder:
     def _build_audio_masking_filter(self, audio) -> str:
         """
         Build complex audio filter chain based on masking intensity.
-        Intensity 0.0 (low) to 1.0 (high).
 
-        Uses aecho + rubberband (tempo + pitch). Avoids vibrato/asetrate
-        which cause NaN errors with AAC encoder on some FFmpeg builds.
+        Profil terbukti mengubah fingerprint (diukur & dikalibrasi di
+        copyright-checker/scripts/audio-morph.cjs, threshold editstrength 0.01):
+
+          intensity 1-3 (Low)  : pitch +3st + lowpass 15k   → dist ~0.10+
+          intensity 4-7 (Med)  : + notch 2k -8dB + reverb   → dist ~0.46
+          intensity 8-10 (High): pitch +4st + 2 notch + reverb kuat → dist ~0.47
+
+        Teknik: asetrate+aresample = pitch shift murni (tanpa ubah durasi),
+        atempo kompensasi balik. Equalizer notch serang band vokal/energi yang
+        paling dominan di fingerprint. aecho = smearing temporal ringan.
+
+        Hindari vibrato (risiko NaN di AAC encoder, build FFmpeg lama).
         """
         intensity = audio.masking_intensity
 
-        # 1. Echo: subtle at low intensity, muddy at high.
-        # aecho=in_gain:out_gain:delay:decay
-        delay_ms = 20 + (intensity * 30)  # 20ms to 50ms
-        delay = delay_ms / 1000.0  # convert milliseconds to seconds
-        decay = 0.1 + (intensity * 0.3) # 0.1 to 0.4
-        echo = f"aecho=0.8:0.88:{delay:.3f}:{decay:.2f}"
+        # Pitch shift: 1-3st scale linear, kompensasi tempo balik biar durasi tetap
+        # 1-3 → 1st..3st; 4-7 → 3st..3.5st; 8-10 → 4st..5st
+        if intensity <= 3:
+            semis = intensity  # 1, 2, 3
+        elif intensity <= 7:
+            semis = 3 + (intensity - 3) * 0.25  # 3.0, 3.25, 3.5, 3.75
+        else:
+            semis = 4 + (intensity - 8) * 0.5   # 4.0, 4.5, 5.0
+        ratio = 2 ** (semis / 12)
 
-        # 2. Pitch/tempo nudge via rubberband (tempo + pitch).
-        # rubberband=tempo=X:pitch=Y
-        #   tempo<1 slows slightly + pitch lowers → thickens, evades fingerprint
-        tempo_mult = 1.0 - (0.005 * intensity)  # 1.0 to 0.995
-        pitch_mult = 1.0 - (0.005 * intensity)  # 1.0 to 0.995
-        rubber = f"rubberband=tempo={tempo_mult:.3f}:pitch={pitch_mult:.3f}"
+        parts = [f"asetrate=44100*{ratio:.6f}", "aresample=44100",
+                 f"atempo={1 / ratio:.6f}"]
 
-        return f"{echo},{rubber}"
+        # EQ notch — serang band vokal (1.5kHz) & presence (2.5kHz)
+        if intensity >= 4:
+            parts.append(f"equalizer=f=2000:t=q:w=2:g={-6 - (intensity // 2):.0f}")
+        if intensity >= 7:
+            parts.append(f"equalizer=f=1500:t=q:w=2:g=-10")
+            parts.append(f"equalizer=f=2500:t=q:w=2:g=-10")
+
+        # Lowpass — buang ultrasonik yang sering dipakai fingerprint
+        parts.append(f"lowpass=f={15000 if intensity < 8 else 14000}")
+
+        # Reverb ringan — smear temporal, bikin segment match lebih susah
+        if intensity >= 4:
+            wet = 0.3 if intensity < 8 else 0.45
+            parts.append(f"aecho=0.8:0.9:50|110:{wet:.2f}|{wet * 0.7:.2f}")
+
+        return ",".join(parts)
 

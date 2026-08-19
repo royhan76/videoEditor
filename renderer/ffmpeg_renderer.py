@@ -84,6 +84,7 @@ class FFmpegRenderer:
                 margin_v      = PresetLoader.calculate_safe_margin(
                     timeline.output.height, bottom_safe_pct=5
                 ),
+                font_size     = timeline.subtitle.font_size or None,
             )
             logger.info(f"Subtitle .ass disimpan: {saved}")
         else:
@@ -301,13 +302,20 @@ class FFmpegRenderer:
 
     @staticmethod
     def check_codec(codec: str) -> bool:
-        """Cek apakah codec tertentu didukung FFmpeg."""
+        """Cek apakah codec BENAR-BENAR bisa dipakai (bukan cuma terdaftar).
+
+        h264_nvenc bisa terdaftar di -encoders tapi gagal dibuka di GPU lama
+        (OpenEncodeSessionEx failed: unsupported device → error -542398533).
+        Tes nyata: encode 1 frame testsrc.
+        """
         try:
             result = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
-                capture_output=True, text=True, timeout=5
+                ["ffmpeg", "-hide_banner", "-f", "lavfi",
+                 "-i", "testsrc=duration=0.1:size=64x64:rate=5",
+                 "-c:v", codec, "-f", "null", "-"],
+                capture_output=True, text=True, timeout=15
             )
-            return codec in result.stdout
+            return result.returncode == 0
         except Exception:
             return False
 
