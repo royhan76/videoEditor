@@ -132,7 +132,10 @@ class FFmpegCommandBuilder:
                 fades.append(f"afade=t=out:st={fo_start:.3f}:d={fo:.3f}")
             if fades:
                 audio_chain += "," + ",".join(fades)
-            audio_chain += f"[a{i}]"
+            # Pangkas audio ke durasi segmen + normalize PTS (concat-safe).
+            # Masking (asetrate/atempo) bisa ngubah panjang audio → DTS korup
+            # kalau di-concat tanpa atrim. asetpts=N/SR/TB bikin PTS sample-based.
+            audio_chain += f",atrim=duration={dur:.6f},asetpts=N/SR/TB[a{i}]"
             filter_parts.append(audio_chain)
 
 
@@ -244,7 +247,9 @@ class FFmpegCommandBuilder:
                     mask_filter = self._build_audio_masking_filter(timeline.audio)
                     audio_chain += f",{mask_filter}"
                 
-                filter_parts.append(f"{audio_chain}[a{i}]")
+                dur = seg.duration_ms / 1000
+                audio_chain += f",atrim=duration={dur:.6f},asetpts=N/SR/TB[a{i}]"
+                filter_parts.append(audio_chain)
 
             concat_in = "".join(f"[v{i}][a{i}]" for i in range(n))
             filter_parts.append(f"{concat_in}concat=n={n}:v=1:a=1[vcat][acat]")
@@ -298,7 +303,7 @@ class FFmpegCommandBuilder:
             if timeline.audio.masking_enabled:
                 mask_filter = self._build_audio_masking_filter(timeline.audio)
                 filter_parts.append(
-                    f"[0:a]asetpts=PTS-STARTPTS,{mask_filter}[amasked]"
+                    f"[0:a]asetpts=N/SR/TB,{mask_filter}[amasked]"
                 )
                 audio_map = "[amasked]"
                 audio_codec = ["-c:a", "aac", "-b:a", "192k"]
