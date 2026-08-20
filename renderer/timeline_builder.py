@@ -114,9 +114,15 @@ class VisualInfo:
         sat      = 1.0 + lvl * 0.015      # 1.015 → 1.15
         noise    = max(1, int(3 + lvl * 1.0))  # 4 → 13
 
+        # Scale ke lebar output ASLI tapi PERTAHANKAN aspect ratio crop.
+        # Manual lolos: crop 1440:694 → scale 1614:778 (aspek 2.07 dipertahankan).
+        # Bug lama: scale={src_w}:{src_h} → aspek balik ke 1.62, fingerprint mirip lagi.
+        out_w = src_w
+        out_h = _even(max(2, int(src_w * ch / cw)))
+
         parts = [
             f"crop={cw}:{ch}:{cx}:{cy}",
-            f"scale={src_w}:{src_h}",
+            f"scale={out_w}:{out_h}",
             f"eq=contrast={contrast:.2f}:saturation={sat:.2f}",
             f"noise=alls={noise}:allf=t+u",
         ]
