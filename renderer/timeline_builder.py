@@ -96,13 +96,16 @@ class VisualInfo:
             initial_filters.append("hflip")
 
         lvl = self.level
-        # crop %: level 1-10 (2% -> 20% zoom). Level 10 sangat agresif buat lolos YT.
-        pct = 0.02 + (lvl - 1) * (0.18 / 9)  # 0.02 to 0.20
+        # Crop ASIMETRIS: lebar ringan, tinggi dalam → ubah aspect ratio
+        # (racikan manual yang lolos YT: crop 1440:694 dari 1920x1080 = aspek 2.07)
+        # pct_w: 2% → 16% ; pct_h: 8% → 41% (lvl 1-10)
+        pct_w = 0.02 + (lvl - 1) * 0.015
+        pct_h = 0.08 + (lvl - 1) * 0.037
         # Force even dimensions — libx264 (dan H.264) reject ganjil, error
         # "Invalid too big or non positive size". cx/cy juga genap biar crop valid.
         def _even(v): return v - (v % 2)
-        cw = _even(max(2, min(src_w - 2, int(src_w * (1 - pct)))))
-        ch = _even(max(2, min(src_h - 2, int(src_h * (1 - pct)))))
+        cw = _even(max(2, min(src_w - 2, int(src_w * (1 - pct_w)))))
+        ch = _even(max(2, min(src_h - 2, int(src_h * (1 - pct_h)))))
         cx = _even(max(0, (src_w - cw) // 2))
         cy = _even(max(0, (src_h - ch) // 2))
 
