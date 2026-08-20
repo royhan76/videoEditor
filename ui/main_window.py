@@ -49,6 +49,7 @@ class RenderJob:
     masking_intensity: float = 0.5
     visual_enabled: bool = False
     visual_level: int = 5
+    mirror_enabled: bool = False
     # Status: "pending" | "running" | "done" | "failed"
     status: str = "pending"
     output_path: str = ""
@@ -467,6 +468,12 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_masking_controls())
         lay.addWidget(self._build_separator())
         lay.addWidget(self._build_visual_controls())
+        # Preset 6‑7 button – set masking level 6 & visual level 7
+        self._preset_6_7_btn = QPushButton('Preset 6‑7', self)
+        self._preset_6_7_btn.setObjectName('preset_6_7_btn')
+        self._preset_6_7_btn.setToolTip('Set Audio masking to level 6 and Visual treatment to level 7')
+        self._preset_6_7_btn.clicked.connect(self._apply_preset_6_7)
+        lay.addWidget(self._preset_6_7_btn)
         lay.addWidget(self._build_separator())
 
         crop_lbl = QLabel("CROP MARGINS (16:9)")
@@ -663,6 +670,15 @@ class MainWindow(QMainWindow):
 
         lay.addLayout(hdr)
 
+        self._mirror_check = QCheckBox("Mirror Video (HFlip)")
+        self._mirror_check.setChecked(False)
+        self._mirror_check.setToolTip(
+            "Balik video secara horizontal (kiri-kanan). Sangat efektif untuk "
+            "merontokkan klaim Content ID visual di YouTube, terutama pada segmen "
+            "mukadimah atau intro yang kuat fingerprint-nya."
+        )
+        lay.addWidget(self._mirror_check)
+
         slider_row = QHBoxLayout()
         slider_row.setSpacing(8)
 
@@ -699,7 +715,30 @@ class MainWindow(QMainWindow):
 
         return w
 
+    def _apply_preset_6_7(self):
+        """Set UI controls to preset audio=6, visual=7, mirror=on."""
+        # Audio masking
+        if hasattr(self, '_masking_spin'):
+            self._masking_spin.setValue(6)
+        if hasattr(self, '_masking_slider'):
+            self._masking_slider.setValue(6)
+        # Visual treatment
+        if hasattr(self, '_visual_spin'):
+            self._visual_spin.setValue(7)
+        if hasattr(self, '_visual_slider'):
+            self._visual_slider.setValue(7)
+        # Mirror
+        if hasattr(self, '_mirror_check'):
+            self._mirror_check.setChecked(True)
+        # Refresh preview (if loaded)
+        try:
+            self._preview.set_masking(self._masking_check.isChecked(), float(self._masking_spin.value()))
+            self._preview.set_visual(self._visual_check.isChecked(), float(self._visual_spin.value()))
+        except Exception:
+            pass
+
     # ─── Add to Queue Button ──────────────────────────────────────────────────
+
 
     def _build_add_button(self) -> QWidget:
         w = QWidget()
@@ -921,6 +960,7 @@ class MainWindow(QMainWindow):
             masking_intensity   = float(self._masking_spin.value()),  # level 1-10 integer scale
             visual_enabled      = self._visual_check.isChecked(),
             visual_level        = self._visual_spin.value(),
+            mirror_enabled       = self._mirror_check.isChecked(),
         )
 
         self._queue.append(job)
@@ -1072,6 +1112,7 @@ class MainWindow(QMainWindow):
             masking_intensity= job.masking_intensity,
             visual_enabled   = job.visual_enabled,
             visual_level     = job.visual_level,
+            mirror_enabled   = job.mirror_enabled,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)

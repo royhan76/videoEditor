@@ -52,10 +52,11 @@ class RenderWorker(QThread):
         masking_intensity: float = 0.5,
         visual_enabled: bool = False,
         visual_level: int = 5,
+        mirror_enabled: bool = False,
     ):
         super().__init__()
         self.video_path       = video_path
-        self.intro_path       = intro_path      # None jika tidak ada intro
+        self.intro_path       = intro_path
         self.subtitle_path    = subtitle_path
         self.subtitle_start   = subtitle_start
         self.subtitle_preset  = subtitle_preset
@@ -66,6 +67,7 @@ class RenderWorker(QThread):
         self.masking_intensity = masking_intensity
         self.visual_enabled = visual_enabled
         self.visual_level   = visual_level
+        self.mirror_enabled = mirror_enabled
         self._cancelled       = False
 
     def cancel(self):
@@ -91,6 +93,7 @@ class RenderWorker(QThread):
         config.setdefault("visual", {})
         config["visual"]["enabled"] = self.visual_enabled
         config["visual"]["level"]   = self.visual_level
+        config["visual"]["mirror_enabled"] = self.mirror_enabled
         # Override audio masking settings dari UI
         config.setdefault("audio", {}).update({
             "masking_enabled": self.masking_enabled,

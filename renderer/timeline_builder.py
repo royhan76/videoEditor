@@ -80,6 +80,7 @@ class VisualInfo:
     """
     enabled: bool = False
     level: int = 5
+    mirror_enabled: bool = False
 
     def vf_suffix(self, src_w: int, src_h: int) -> str:
         """Return filter string yang ditambahkan SETELAH crop filter.
@@ -89,9 +90,14 @@ class VisualInfo:
         """
         if not self.enabled or self.level <= 0:
             return ""
+
+        initial_filters = []
+        if self.mirror_enabled:
+            initial_filters.append("hflip")
+
         lvl = self.level
-        # crop %: 2% @ lvl1 → 15% @ lvl10 (dari ukuran post-crop)
-        pct = 0.02 + (lvl - 1) * (0.13 / 9)
+        # crop %: level 1-10 (2% -> 20% zoom). Level 10 sangat agresif buat lolos YT.
+        pct = 0.02 + (lvl - 1) * (0.18 / 9)  # 0.02 to 0.20
         # Force even dimensions — libx264 (dan H.264) reject ganjil, error
         # "Invalid too big or non positive size". cx/cy juga genap biar crop valid.
         def _even(v): return v - (v % 2)
@@ -100,9 +106,10 @@ class VisualInfo:
         cx = _even(max(0, (src_w - cw) // 2))
         cy = _even(max(0, (src_h - ch) // 2))
 
-        contrast = 1.0 + lvl * 0.012      # 1.01 → 1.12
-        sat      = 1.0 + lvl * 0.012      # 1.01 → 1.12
-        noise    = max(1, int(2 + lvl * 0.8))  # 3 → 10
+        # Contrast/Saturation diperkuat biar fingerprint warna berubah drastis
+        contrast = 1.0 + lvl * 0.015      # 1.015 → 1.15
+        sat      = 1.0 + lvl * 0.015      # 1.015 → 1.15
+        noise    = max(1, int(3 + lvl * 1.0))  # 4 → 13
 
         parts = [
             f"crop={cw}:{ch}:{cx}:{cy}",
@@ -110,7 +117,7 @@ class VisualInfo:
             f"eq=contrast={contrast:.2f}:saturation={sat:.2f}",
             f"noise=alls={noise}:allf=t+u",
         ]
-        return ",".join(parts)
+        return ",".join(initial_filters + parts)
 
 
 @dataclass
@@ -397,6 +404,7 @@ class TimelineBuilder:
         return VisualInfo(
             enabled = v.get("enabled", False),
             level   = v.get("level", 5),
+            mirror_enabled = v.get("mirror_enabled", False),
         )
 
     def _build_audio(self) -> AudioInfo:
