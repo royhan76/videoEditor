@@ -50,6 +50,10 @@ class RenderJob:
     visual_enabled: bool = False
     visual_level: int = 5
     mirror_enabled: bool = False
+    visual_mode: str = "level"          # "level" | "nuclear"
+    nuclear_params: dict = field(default_factory=dict)   # kosong = default config
+    audio_masking_mode: str = "level"   # "level" | "mode_b"
+    audio_pitch_pct: float = 5.0        # pitch shift % utk Mode B
     # Status: "pending" | "running" | "done" | "failed"
     status: str = "pending"
     output_path: str = ""
@@ -468,6 +472,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_masking_controls())
         lay.addWidget(self._build_separator())
         lay.addWidget(self._build_visual_controls())
+        lay.addWidget(self._build_nuclear_controls())
         # Preset 6‑7 button – set masking level 6 & visual level 7
         self._preset_6_7_btn = QPushButton('Preset 6‑7', self)
         self._preset_6_7_btn.setObjectName('preset_6_7_btn')
@@ -715,6 +720,150 @@ class MainWindow(QMainWindow):
 
         return w
 
+    def _build_nuclear_controls(self) -> QWidget:
+        """Nuclear V2 — resep terbukti lolos klaim (Aug 2026). Default nilai
+        terbukti, semua knob bisa di-custom. Audio otomatis Mode B."""
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setSpacing(8)
+
+        hdr = QHBoxLayout()
+        lbl = QLabel("NUCLEAR V2")
+        lbl.setObjectName("section_label")
+        hdr.addWidget(lbl)
+        hdr.addStretch()
+
+        # Toggle: aktifkan nuclear → matikan mode level, dst.
+        self._nuclear_check = QCheckBox("Aktif (ganti Visual Level)")
+        self._nuclear_check.setToolTip(
+            "Resep single-pass terbukti lolos Content ID: mirror + warp + crop 42% "
+            "+ rotate 2° + hue 40° + noise 18 + speed 1.25x + fps 30. "
+            "Audio otomatis Mode B (pitch +5%, tempo total 1.25x)."
+        )
+        self._nuclear_check.toggled.connect(self._on_nuclear_toggled)
+        hdr.addWidget(self._nuclear_check)
+        lay.addLayout(hdr)
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(4)
+
+        def _dbl(vmin, vmax, vdef, step, dec=2):
+            s = QDoubleSpinBox()
+            s.setRange(vmin, vmax)
+            s.setValue(vdef)
+            s.setSingleStep(step)
+            s.setDecimals(dec)
+            s.setEnabled(False)
+            return s
+
+        # Baris 0: crop % + rotate
+        form.addWidget(QLabel("Crop %"), 0, 0)
+        self._nc_crop = _dbl(10.0, 70.0, 42.4, 1.0)
+        self._nc_crop.setToolTip("Crop total %. Resep terbukti: 42.4 (= 0.8 x 0.72)")
+        form.addWidget(self._nc_crop, 0, 1)
+        form.addWidget(QLabel("Rotate °"), 0, 2)
+        self._nc_rotate = _dbl(0.0, 10.0, 2.0, 0.5)
+        form.addWidget(self._nc_rotate, 0, 3)
+
+        # Baris 1: hue + sat hue
+        form.addWidget(QLabel("Hue °"), 1, 0)
+        self._nc_hue = _dbl(0.0, 360.0, 40.0, 5.0)
+        form.addWidget(self._nc_hue, 1, 1)
+        form.addWidget(QLabel("Hue Sat"), 1, 2)
+        self._nc_huesat = _dbl(0.0, 3.0, 1.4, 0.1)
+        form.addWidget(self._nc_huesat, 1, 3)
+
+        # Baris 2: contrast + eq sat
+        form.addWidget(QLabel("Contrast"), 2, 0)
+        self._nc_contrast = _dbl(1.0, 2.0, 1.15, 0.05)
+        form.addWidget(self._nc_contrast, 2, 1)
+        form.addWidget(QLabel("Eq Sat"), 2, 2)
+        self._nc_eqsat = _dbl(0.0, 3.0, 1.2, 0.1)
+        form.addWidget(self._nc_eqsat, 2, 3)
+
+        # Baris 3: speed + pitch
+        form.addWidget(QLabel("Speed x"), 3, 0)
+        self._nc_speed = _dbl(1.0, 2.0, 1.25, 0.05)
+        self._nc_speed.setToolTip("Kunci lolos Content ID visual. Tempo audio ikut menyesuaikan otomatis.")
+        form.addWidget(self._nc_speed, 3, 1)
+        form.addWidget(QLabel("Pitch %"), 3, 2)
+        self._nc_pitch = _dbl(0.0, 15.0, 5.0, 1.0, dec=1)
+        self._nc_pitch.setToolTip("Audio Mode B: pitch naik sekian % (asetrate). Resep terbukti: +5.")
+        form.addWidget(self._nc_pitch, 3, 3)
+
+        # Baris 4: noise + fps
+        form.addWidget(QLabel("Noise"), 4, 0)
+        self._nc_noise = QSpinBox()
+        self._nc_noise.setRange(0, 50)
+        self._nc_noise.setValue(18)
+        self._nc_noise.setEnabled(False)
+        form.addWidget(self._nc_noise, 4, 1)
+        form.addWidget(QLabel("FPS"), 4, 2)
+        self._nc_fps = QSpinBox()
+        self._nc_fps.setRange(24, 60)
+        self._nc_fps.setValue(30)
+        self._nc_fps.setEnabled(False)
+        form.addWidget(self._nc_fps, 4, 3)
+
+        lay.addLayout(form)
+
+        # Tombol reset ke resep terbukti
+        self._nuclear_reset_btn = QPushButton("Reset ke Resep Terbukti")
+        self._nuclear_reset_btn.setObjectName("browse_btn")
+        self._nuclear_reset_btn.clicked.connect(self._reset_nuclear_defaults)
+        self._nuclear_reset_btn.setEnabled(False)
+        lay.addWidget(self._nuclear_reset_btn)
+
+        # Semua knob disable/enable ikut toggle
+        self._nuclear_knobs = [
+            self._nc_crop, self._nc_rotate, self._nc_hue, self._nc_huesat,
+            self._nc_contrast, self._nc_eqsat, self._nc_speed, self._nc_pitch,
+            self._nc_noise, self._nc_fps, self._nuclear_reset_btn,
+        ]
+        for k in self._nuclear_knobs:
+            self._nuclear_check.toggled.connect(k.setEnabled)
+
+        return w
+
+    def _on_nuclear_toggled(self, on: bool):
+        """Nuclear aktif → visual level off; audio pindah ke Mode B."""
+        if on:
+            self._visual_check.setChecked(False)
+            if hasattr(self, "_masking_check"):
+                self._masking_check.setChecked(True)
+        else:
+            if hasattr(self, "_masking_check"):
+                self._masking_check.setChecked(False)
+
+    def _reset_nuclear_defaults(self):
+        defaults = {
+            self._nc_crop: 42.4, self._nc_rotate: 2.0,
+            self._nc_hue: 40.0, self._nc_huesat: 1.4,
+            self._nc_contrast: 1.15, self._nc_eqsat: 1.2,
+            self._nc_speed: 1.25, self._nc_pitch: 5.0,
+            self._nc_noise: 18, self._nc_fps: 30,
+        }
+        for spin, val in defaults.items():
+            spin.setValue(val)
+
+    def _collect_nuclear_params(self) -> dict:
+        """Dict parameter nuclear utk worker; kosong kalau nuclear tidak aktif."""
+        if not getattr(self, "_nuclear_check", None) or not self._nuclear_check.isChecked():
+            return {}
+        return {
+            "mode": "nuclear",
+            "crop_pct":   float(self._nc_crop.value()),
+            "rotate_deg": float(self._nc_rotate.value()),
+            "hue_deg":    float(self._nc_hue.value()),
+            "hue_sat":    float(self._nc_huesat.value()),
+            "contrast":   float(self._nc_contrast.value()),
+            "eq_sat":     float(self._nc_eqsat.value()),
+            "noise":      int(self._nc_noise.value()),
+            "speed":      float(self._nc_speed.value()),
+            "fps_out":    int(self._nc_fps.value()),
+        }
+
     def _apply_preset_6_7(self):
         """Set UI controls to preset audio=6, visual=7, mirror=on."""
         # Audio masking
@@ -947,6 +1096,7 @@ class MainWindow(QMainWindow):
             return
 
         # Buat job
+        nuclear_params = self._collect_nuclear_params()
         job = RenderJob(
             video_path       = video_path,
             intro_path       = intro_path or None,
@@ -961,6 +1111,10 @@ class MainWindow(QMainWindow):
             visual_enabled      = self._visual_check.isChecked(),
             visual_level        = self._visual_spin.value(),
             mirror_enabled       = self._mirror_check.isChecked(),
+            visual_mode          = "nuclear" if nuclear_params else "level",
+            nuclear_params       = nuclear_params,
+            audio_masking_mode   = "mode_b" if nuclear_params else "level",
+            audio_pitch_pct      = float(self._nc_pitch.value()),
         )
 
         self._queue.append(job)
@@ -1113,6 +1267,9 @@ class MainWindow(QMainWindow):
             visual_enabled   = job.visual_enabled,
             visual_level     = job.visual_level,
             mirror_enabled   = job.mirror_enabled,
+            nuclear_params   = job.nuclear_params,
+            audio_masking_mode = job.audio_masking_mode,
+            audio_pitch_ratio  = 1.0 + (job.audio_pitch_pct / 100.0),
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)

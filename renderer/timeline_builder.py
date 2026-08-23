@@ -16,6 +16,10 @@ from subtitle.preset_loader import PresetLoader
 
 logger = logging.getLogger(__name__)
 
+# Kanvas Nuclear V2 (perspective resep hardcode utk 1920x1080; output resep 1536x864)
+NUCLEAR_CANVAS = (1920, 1080)
+NUCLEAR_OUT    = (1536, 864)
+
 
 # ─── Timeline Data Models ────────────────────────────────────────────────────────
 
@@ -66,21 +70,40 @@ class VisualInfo:
     """
     Visual treatment (anti-Copyright visual) — terapkan SETELAH crop.
 
-    Kalibrasi riil di mesin user (video ceramah 380x234):
-      level 5: crop 10% + contrast 6% + sat 6% + noise 5
-        → claim PT DRM "Audio visual" LEPAS total.
+    Dua mode:
+      mode="level"   : skala level 1-10 lama (crop asimetris + eq + noise).
+      mode="nuclear" : Nuclear V2 — resep terbukti lolos klaim (Aug 2026),
+                       identik dgn output/research/render_final_clean.py:
+                       mirror + warp + crop 42.4% + rotate 2° + hue 40° +
+                       noise 18 + speed 1.25x + fps 30 (single-pass).
 
-    Nilai:
-      enabled : aktif/tidak
-      level   : 0-10
-        - level 0      : tidak ada filter
-        - 1-4          : crop 2-8% + contrast/sat 2-4% (ringan)
-        - 5-7          : crop 10% + contrast/sat 6-8% + noise 5-7 (default 5 = terbukti)
-        - 8-10         : crop 12-15% + contrast/sat 10-12% + noise 8-10 (agresif)
+    Nilai level (mode lama):
+      level 0      : tidak ada filter
+      1-4          : crop 2-8% + contrast/sat 2-4% (ringan)
+      5-7          : crop 10% + contrast/sat 6-8% + noise 5-7 (default 5 = terbukti)
+      8-10         : crop 12-15% + contrast/sat 10-12% + noise 8-10 (agresif)
     """
     enabled: bool = False
     level: int = 5
     mirror_enabled: bool = False
+    mode: str = "level"          # "level" | "nuclear"
+    # ── Parameter Nuclear V2 (default = resep terbukti, JANGAN diubah sembarangan) ──
+    crop_pct: float = 42.4       # crop total % (42.4 -> sisa 0.576 = 0.8*0.72)
+    rotate_deg: float = 2.0
+    hue_deg: float = 40.0
+    hue_sat: float = 1.4         # saturation di filter hue
+    contrast: float = 1.15       # eq contrast
+    eq_sat: float = 1.2          # eq saturation
+    noise: int = 18
+    speed: float = 1.25          # 1.25 = setpts 0.8 (kunci lolos Content ID visual)
+    fps_out: int = 30
+
+    @property
+    def speed_factor(self) -> float:
+        """Faktor percepatan temporal yang aktif (1.0 kalau tidak dipakai)."""
+        if self.enabled and self.mode == "nuclear" and self.speed > 0:
+            return float(self.speed)
+        return 1.0
 
     def vf_suffix(self, src_w: int, src_h: int) -> str:
         """Return filter string yang ditambahkan SETELAH crop filter.
@@ -88,7 +111,37 @@ class VisualInfo:
         Memakai ukuran POST-crop (crop.width/height) sebagai basis, karena
         filter ini dipasang setelah [vcrop] di chain.
         """
-        if not self.enabled or self.level <= 0:
+        if not self.enabled:
+            return ""
+        if self.mode == "nuclear":
+            return self._nuclear_vf()
+        return self._level_vf(src_w, src_h)
+
+    def _nuclear_vf(self) -> str:
+        """Chain Nuclear V2 — normalisasi ke kanvas 1920x1080 dulu (koordinat
+        perspective resep memang hardcode utk 1920x1080), lalu treatment
+        single-pass persis render_final_clean.py. Output selalu 1536x864."""
+        cw, chh = NUCLEAR_CANVAS
+        ow, oh = NUCLEAR_OUT
+        keep = min(max(1.0 - self.crop_pct / 100.0, 0.2), 0.95)
+        mirror = "hflip," if self.mirror_enabled else ""
+        return (
+            f"scale={cw}:{chh}:force_original_aspect_ratio=decrease,"
+            f"pad={cw}:{chh}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=60,"
+            f"{mirror}"
+            f"perspective=x0=20:y0=20:x1={cw - 20}:y1=10:x2=10:y2={chh - 10}"
+            f":x3={cw - 10}:y3={chh - 20}:sense=destination,"
+            f"crop=w='iw*{keep:.4f}':h='ih*{keep:.4f}':x='(iw-ow)/2':y='(ih-oh)/2',"
+            f"scale={ow}:{oh},"
+            f"rotate={self.rotate_deg:.2f}*PI/180:fillcolor=black,"
+            f"hue=h={self.hue_deg:.1f}:s={self.hue_sat},"
+            f"eq=contrast={self.contrast}:saturation={self.eq_sat},"
+            f"noise=alls={int(self.noise)}:allf=t+u,"
+            f"setpts={1.0 / self.speed_factor:.6f}*PTS,fps={int(self.fps_out)}"
+        )
+
+    def _level_vf(self, src_w: int, src_h: int) -> str:
+        if self.level <= 0:
             return ""
 
         initial_filters = []
@@ -137,6 +190,24 @@ class AudioInfo:
     crossfade_ms: int
     masking_enabled: bool = False
     masking_intensity: float = 0.5  # 0.0 to 1.0
+    masking_mode: str = "level"     # "level" | "mode_b" (Nuclear V2)
+    # Mode B: pitch ratio (1.05 = +5%). Tempo kompensasi dihitung otomatis
+    # dari visual.speed_factor biar total speed audio == speed video (sync rule).
+    pitch_ratio: float = 1.05
+
+
+def mode_b_audio_filter(pitch_ratio: float, speed_factor: float) -> str:
+    """
+    Audio Mode B — resep terbukti: asetrate*pitch, lalu atempo kompensasi
+    supaya total speed = speed_factor video (sinkron bibir).
+      pitch 1.05 + speed 1.25 → atempo = 1.25/1.05 = 1.190476.
+    """
+    ratio = max(0.5, min(2.0, float(pitch_ratio)))
+    tempo = max(0.5, min(100.0, speed_factor / ratio))
+    return (
+        f"asetrate=44100*{ratio:.6f},aresample=44100,"
+        f"atempo={tempo:.6f}"
+    )
 
 
 @dataclass
@@ -414,6 +485,16 @@ class TimelineBuilder:
             enabled = v.get("enabled", False),
             level   = v.get("level", 5),
             mirror_enabled = v.get("mirror_enabled", False),
+            mode    = v.get("mode", "level"),
+            crop_pct  = v.get("crop_pct", 42.4),
+            rotate_deg= v.get("rotate_deg", 2.0),
+            hue_deg   = v.get("hue_deg", 40.0),
+            hue_sat   = v.get("hue_sat", 1.4),
+            contrast  = v.get("contrast", 1.15),
+            eq_sat    = v.get("eq_sat", 1.2),
+            noise     = v.get("noise", 18),
+            speed     = v.get("speed", 1.25),
+            fps_out   = v.get("fps_out", 30),
         )
 
     def _build_audio(self) -> AudioInfo:
@@ -424,6 +505,8 @@ class TimelineBuilder:
             crossfade_ms    = a.get("crossfade",    400),
             masking_enabled = a.get("masking_enabled",  False),
             masking_intensity = a.get("masking_intensity", 0.5),
+            masking_mode    = a.get("masking_mode", "level"),
+            pitch_ratio     = a.get("pitch_ratio", 1.05),
         )
 
     def _build_output(self, crop: CropInfo) -> OutputInfo:

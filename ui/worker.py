@@ -53,6 +53,9 @@ class RenderWorker(QThread):
         visual_enabled: bool = False,
         visual_level: int = 5,
         mirror_enabled: bool = False,
+        nuclear_params: dict | None = None,
+        audio_masking_mode: str = "level",
+        audio_pitch_ratio: float = 1.05,
     ):
         super().__init__()
         self.video_path       = video_path
@@ -68,6 +71,10 @@ class RenderWorker(QThread):
         self.visual_enabled = visual_enabled
         self.visual_level   = visual_level
         self.mirror_enabled = mirror_enabled
+        # Parameter Nuclear V2 (dict dari UI; None = default config)
+        self.nuclear_params = nuclear_params or {}
+        self.audio_masking_mode = audio_masking_mode
+        self.audio_pitch_ratio  = float(audio_pitch_ratio)
         self._cancelled       = False
 
     def cancel(self):
@@ -94,10 +101,14 @@ class RenderWorker(QThread):
         config["visual"]["enabled"] = self.visual_enabled
         config["visual"]["level"]   = self.visual_level
         config["visual"]["mirror_enabled"] = self.mirror_enabled
+        # Parameter Nuclear V2 dari UI (kosong = pakai default config)
+        config["visual"].update(self.nuclear_params)
         # Override audio masking settings dari UI
         config.setdefault("audio", {}).update({
             "masking_enabled": self.masking_enabled,
             "masking_intensity": self.masking_intensity,
+            "masking_mode": self.audio_masking_mode,
+            "pitch_ratio": self.audio_pitch_ratio,
         })
 
 

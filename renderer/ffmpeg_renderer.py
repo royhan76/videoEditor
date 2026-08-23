@@ -134,12 +134,16 @@ class FFmpegRenderer:
         Remap timing subtitle dari waktu clip ke waktu final video secara dinamis
         berdasarkan segmen-segmen di timeline.
         """
+        # Kompensasi speed (Nuclear V2): video diputar lebih cepat,
+        # subtitle harus diskalakan dgn faktor yang sama biar sinkron.
+        sf = timeline.visual.speed_factor
+
         # Hitung start time tiap segmen di video final
         segment_mappings = []
         current_final_ms = 0
         for seg in timeline.segments:
             segment_mappings.append((seg, current_final_ms))
-            current_final_ms += seg.duration_ms
+            current_final_ms += seg.duration_ms / sf
 
         remapped = []
         for entry in entries:
@@ -163,8 +167,10 @@ class FFmpegRenderer:
                 continue
 
             # Remap: offset relatif terhadap segmen asal + start_time segmen tersebut di final video
-            new_s = (s - matched_seg.start_ms) + matched_final_start
-            new_e = (e - matched_seg.start_ms) + matched_final_start
+            # int() wajib — pembagian speed menghasilkan float, dan builder .ass
+            # memformat ms dengan kode 'd' (integer-only).
+            new_s = int(round(((s - matched_seg.start_ms) / sf) + matched_final_start))
+            new_e = int(round(((e - matched_seg.start_ms) / sf) + matched_final_start))
 
             remapped.append(SubtitleEntry(
                 index    = entry.index,
@@ -221,6 +227,8 @@ class FFmpegRenderer:
             )
 
             total_duration_ms = sum(s.duration_ms for s in timeline.segments)
+            # Nuclear V2 mempercepat video → waktu FFmpeg berjalan lebih cepat
+            total_duration_ms = int(total_duration_ms / timeline.visual.speed_factor)
 
             for line in process.stdout:
                 line = line.rstrip()

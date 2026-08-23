@@ -1,0 +1,26 @@
+Racikan "Anti‑Copyright Ultra" yang tembus YouTube (Segmen Sulit/Mukadimah):
+
+1. Visual (Kunci: Mirroring + Deep Zoom)
+*   Efek Mirror (hflip): Balik video kiri‑kanan. Ini paling ampuh rontokkan AI visual YT.
+*   Zoom/Crop (Level 7 Baru): Potong tepi 10.6%. Menghilangkan detail frame asli.
+*   Warna (eq): Kontras & Saturasi +8% (1.08). Mengubah sidik jari warna (histogram).
+*   Dither (noise): Noise butiran (Level 7). Membuat piksel tidak statis/sama dengan aslinya.
+
+2. Audio (Kunci: Pitch 3.75 + Notch)
+*   Pitch Shift: Naik 3.75 semitone (ratio 1.24). Suara jadi lebih cempreng/tinggi.
+*   Notch EQ: Potong frekuensi 2kHz sebesar ‑9dB. Menghapus "puncak" frekuensi suara asli.
+*   Reverb/Echo: Gema tipis (aecho) untuk mengaburkan waveform asli.
+
+
+E:\PROJECT\desktop\videoEditor\output\DIAG_VISUAL_V2.mp4
+
+| Spec       | V1 (kena) | V2 (baru)                 |
+|------------|-----------|---------------------------|
+| Durasi     | 180s      | 144s (speed 1.25x)        |
+| FPS        | 60        | 30                        |
+| Crop total | ~20%      | ~42% (20% + 28% berlapis) |
+| Rotate     | -         | +2°                       |
+| Hue shift  | 30°       | 40° + sat 1.4             |
+| Noise      | 15        | 18                        |
+| Audio      | hening    | hening                    |
+

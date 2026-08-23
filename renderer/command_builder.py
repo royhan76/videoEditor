@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from renderer.timeline_builder import Timeline, Segment
+from renderer.timeline_builder import Timeline, Segment, mode_b_audio_filter
 
 
 class FFmpegCommandBuilder:
@@ -118,10 +118,15 @@ class FFmpegCommandBuilder:
 
             # Audio
             audio_chain = f"[{ai}:a]asetpts=PTS-STARTPTS"
-            
+
             # Anti-Copyright Masking
             if audio.masking_enabled:
-                mask_filter = self._build_audio_masking_filter(audio)
+                if audio.masking_mode == "mode_b":
+                    mask_filter = mode_b_audio_filter(
+                        audio.pitch_ratio, timeline.visual.speed_factor
+                    )
+                else:
+                    mask_filter = self._build_audio_masking_filter(audio)
                 audio_chain += f",{mask_filter}"
 
             fades = []
@@ -244,7 +249,12 @@ class FFmpegCommandBuilder:
                 
                 audio_chain = f"[{ai}:a]asetpts=PTS-STARTPTS"
                 if timeline.audio.masking_enabled:
-                    mask_filter = self._build_audio_masking_filter(timeline.audio)
+                    if timeline.audio.masking_mode == "mode_b":
+                        mask_filter = mode_b_audio_filter(
+                            timeline.audio.pitch_ratio, timeline.visual.speed_factor
+                        )
+                    else:
+                        mask_filter = self._build_audio_masking_filter(timeline.audio)
                     audio_chain += f",{mask_filter}"
                 
                 dur = seg.duration_ms / 1000
@@ -301,7 +311,12 @@ class FFmpegCommandBuilder:
 
             # Audio stream: masking if enabled, else copy
             if timeline.audio.masking_enabled:
-                mask_filter = self._build_audio_masking_filter(timeline.audio)
+                if timeline.audio.masking_mode == "mode_b":
+                    mask_filter = mode_b_audio_filter(
+                        timeline.audio.pitch_ratio, timeline.visual.speed_factor
+                    )
+                else:
+                    mask_filter = self._build_audio_masking_filter(timeline.audio)
                 filter_parts.append(
                     f"[0:a]asetpts=N/SR/TB,{mask_filter}[amasked]"
                 )
