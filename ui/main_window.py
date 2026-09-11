@@ -167,7 +167,13 @@ class MainWindow(QMainWindow):
         self._current_job_idx = -1
 
         self._setup_window()
+        # Init preview debounce timer SEBELUM setup_ui agar signal
+        # font size (yang di-trigger dari _populate_presets) tidak crash
+        self._preview_debounce = QTimer(self)
+        self._preview_debounce.setSingleShot(True)
+        self._preview_debounce.setInterval(250)
         self._setup_ui()
+        self._preview_debounce.timeout.connect(self._refresh_preview_overlays)
         self._apply_style()
         self._check_environment()
         self._wire_preview()
@@ -228,11 +234,6 @@ class MainWindow(QMainWindow):
         splitter.setSizes([480, 800])
 
         root.addWidget(splitter)
-
-        self._preview_debounce = QTimer(self)
-        self._preview_debounce.setSingleShot(True)
-        self._preview_debounce.setInterval(250)
-        self._preview_debounce.timeout.connect(self._refresh_preview_overlays)
 
     # ─── Header ──────────────────────────────────────────────────────────────
 
