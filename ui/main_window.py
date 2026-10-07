@@ -409,6 +409,10 @@ class MainWindow(QMainWindow):
         lbl.setObjectName("section_label")
         lay.addWidget(lbl)
 
+        # API Key Configuration
+        lay.addLayout(self._build_api_config())
+        lay.addWidget(self._build_separator())
+
         row1 = QHBoxLayout()
         row1.setSpacing(8)
 
@@ -582,6 +586,192 @@ class MainWindow(QMainWindow):
         """User changed font size → mark as custom and refresh preview."""
         self._custom_font_size = True
         self._schedule_preview_refresh()
+
+    def _build_api_config(self) -> QHBoxLayout:
+        """Build API Key configuration row with validation."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        lbl = QLabel("API Key")
+        lbl.setObjectName("field_label")
+        lbl.setMinimumWidth(90)
+        lbl.setMaximumWidth(120)
+        lbl.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+        self._api_key_edit = QLineEdit()
+        self._api_key_edit.setPlaceholderText("Masukkan Gemini API Key...")
+        self._api_key_edit.setEchoMode(QLineEdit.Password)
+        self._api_key_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._api_key_edit.setToolTip("Dapatkan API key gratis di: https://aistudio.google.com/apikey")
+        # Load existing key from config
+        existing_key = self._config.get("api", {}).get("api_key", "")
+        if existing_key and existing_key != "YOUR_GEMINI_API_KEY_HERE":
+            self._api_key_edit.setText(existing_key)
+        self._api_key_edit.editingFinished.connect(self._save_api_key_to_config)
+
+        self._api_show_btn = QPushButton("👁")
+        self._api_show_btn.setObjectName("browse_btn")
+        self._api_show_btn.setFixedSize(32, 32)
+        self._api_show_btn.setCursor(Qt.PointingHandCursor)
+        self._api_show_btn.setToolTip("Tampilkan/Sembunyikan API Key")
+        self._api_show_btn.setCheckable(True)
+        self._api_show_btn.toggled.connect(self._toggle_api_visibility)
+
+        self._api_validate_btn = QPushButton("Cek API")
+        self._api_validate_btn.setObjectName("browse_btn")
+        self._api_validate_btn.setCursor(Qt.PointingHandCursor)
+        self._api_validate_btn.setToolTip("Validasi API Key dengan Google AI Studio")
+        self._api_validate_btn.clicked.connect(self._validate_api_key)
+
+        self._api_status_lbl = QLabel("")
+        self._api_status_lbl.setObjectName("api_status")
+        self._api_status_lbl.setFixedWidth(120)
+        self._api_status_lbl.setAlignment(Qt.AlignCenter)
+
+        row.addWidget(lbl)
+        row.addWidget(self._api_key_edit)
+        row.addWidget(self._api_show_btn)
+        row.addWidget(self._api_validate_btn)
+        row.addWidget(self._api_status_lbl)
+
+        return row
+
+    def _toggle_api_visibility(self, checked: bool):
+        if checked:
+            self._api_key_edit.setEchoMode(QLineEdit.Normal)
+            self._api_show_btn.setText("🙈")
+        else:
+            self._api_key_edit.setEchoMode(QLineEdit.Password)
+            self._api_show_btn.setText("👁")
+
+    def _validate_api_key(self):
+        raw_key = self._api_key_edit.text()
+        import re
+        api_key = re.sub(r"\s+", "", raw_key).strip('"').strip("'")
+        if api_key != raw_key:
+            self._api_key_edit.setText(api_key)
+
+        if not api_key:
+            self._api_status_lbl.setText("⚠ Kosong")
+            self._api_status_lbl.setObjectName("status_error")
+            self._api_status_lbl.setToolTip("Masukkan Gemini API Key terlebih dahulu.")
+            self._api_status_lbl.style().unpolish(self._api_status_lbl)
+            self._api_status_lbl.style().polish(self._api_status_lbl)
+            self._log("[API] Masukkan API Key Gemini terlebih dahulu.")
+            return
+
+        self._api_validate_btn.setEnabled(False)
+        self._api_validate_btn.setText("Mengecek...")
+        self._api_status_lbl.setText("⏳ Mengecek...")
+        self._api_status_lbl.setObjectName("status_running")
+        self._api_status_lbl.setToolTip("Sedang menghubungi Google AI Studio...")
+        self._api_status_lbl.style().unpolish(self._api_status_lbl)
+        self._api_status_lbl.style().polish(self._api_status_lbl)
+        self._log("[API] Memvalidasi API Key ke Google AI Studio...")
+
+        # Run validation in background thread
+        from PySide6.QtCore import QThread, Signal
+
+        class ApiValidator(QThread):
+            result = Signal(bool, str, str, str)
+
+            def __init__(self, key: str):
+                super().__init__()
+                self.key = key
+
+            def run(self):
+                try:
+                    from google import genai
+                    client = genai.Client(api_key=self.key)
+                    # Gunakan models.list untuk verifikasi autentikasi API key.
+                    # Tidak bergantung pada satu nama model (anti-404) dan hemat kuota token.
+                    pager = client.models.list(config={"page_size": 10})
+                    models_found = []
+                    for m in pager:
+                        name = getattr(m, "name", "")
+                        clean_name = name.replace("models/", "")
+                        actions = getattr(m, "supported_actions", None) or []
+                        if not actions or "generateContent" in actions:
+                            models_found.append(clean_name)
+                        if len(models_found) >= 5:
+                            break
+
+                    preferred_model = ""
+                    for candidate in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+                        if candidate in models_found:
+                            preferred_model = candidate
+                            break
+                    if not preferred_model and models_found:
+                        preferred_model = models_found[0]
+
+                    msg = f"API Key valid! Model aktif: {preferred_model or 'Terhubung'}"
+                    self.result.emit(True, "✓ Valid", msg, preferred_model)
+
+                except Exception as e:
+                    code = getattr(e, "code", None)
+                    msg = getattr(e, "message", None) or str(e)
+                    err_str = str(e)
+
+                    if "API_KEY_INVALID" in err_str or (code == 400 and "API key not valid" in msg):
+                        short_err = "✗ Tidak Valid"
+                        detail = "API Key tidak valid. Pastikan key disalin dengan benar dari aistudio.google.com."
+                    elif "PERMISSION_DENIED" in err_str or code == 403:
+                        short_err = "✗ Ditolak (403)"
+                        detail = f"Akses ditolak (403): Periksa izin/project pada API key Anda."
+                    elif "RESOURCE_EXHAUSTED" in err_str or code == 429:
+                        short_err = "✗ Quota Habis"
+                        detail = f"Quota API habis / Rate limit (429): {msg}"
+                    elif any(w in msg.lower() for w in ["connection", "timeout", "network", "getaddrinfo"]):
+                        short_err = "✗ Koneksi Gagal"
+                        detail = "Gagal terhubung ke server Gemini. Periksa koneksi internet Anda."
+                    else:
+                        short_err = "✗ Error"
+                        detail = f"Validasi gagal: {msg}"
+
+                    self.result.emit(False, short_err, detail, "")
+
+        self._api_validator = ApiValidator(api_key)
+        self._api_validator.result.connect(self._on_api_validation_result)
+        self._api_validator.start()
+
+    def _on_api_validation_result(self, success: bool, short_msg: str, detail_msg: str, detected_model: str):
+        self._api_validate_btn.setEnabled(True)
+        self._api_validate_btn.setText("Cek API")
+        self._api_status_lbl.setText(short_msg)
+        self._api_status_lbl.setToolTip(detail_msg)
+
+        if success:
+            self._api_status_lbl.setObjectName("status_done")
+            self._save_api_key_to_config(detected_model=detected_model)
+            self._log(f"[API] {detail_msg}")
+        else:
+            self._api_status_lbl.setObjectName("status_error")
+            self._log(f"[API ERROR] {detail_msg}")
+
+        self._api_status_lbl.style().unpolish(self._api_status_lbl)
+        self._api_status_lbl.style().polish(self._api_status_lbl)
+
+    def _save_api_key_to_config(self, detected_model: str = ""):
+        import re
+        api_key = re.sub(r"\s+", "", self._api_key_edit.text()).strip('"').strip("'")
+        if not api_key:
+            return
+        try:
+            import json
+            from config.config_loader import CONFIG_PATH, ConfigLoader
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            config["api"]["api_key"] = api_key
+            if detected_model:
+                config["api"]["model"] = detected_model
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+            # Reload config singleton
+            ConfigLoader().reload()
+            self._config = ConfigLoader().all()
+            self._log(f"[CONFIG] API Key disimpan ke config.json")
+        except Exception as e:
+            self._log(f"[ERROR] Gagal simpan API Key: {e}")
 
     # ─── Audio Masking Controls ─────────────────────────────────────────────
 
