@@ -28,6 +28,8 @@ from subtitle.preset_loader import PresetLoader
 from config import load_config, get_preset_dir
 from renderer.ffmpeg_renderer import FFmpegRenderer
 from subtitle.time_utils import timestamp_to_ms, ms_to_timestamp
+from youtube import YouTubeAuth, YouTubeAuthThread, YouTubeCheckThread, YouTubeUploadThread
+from youtube.uploader import YOUTUBE_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +168,14 @@ class MainWindow(QMainWindow):
         self._queue_running = False
         self._current_job_idx = -1
 
+        # YouTube state
+        self._yt_auth = YouTubeAuth()
+        self._yt_creds = None
+        self._yt_channel_info = None
+        self._yt_upload_worker = None
+        self._yt_auth_worker = None
+        self._yt_check_worker = None
+
         self._setup_window()
         # Init preview debounce timer SEBELUM setup_ui agar signal
         # font size (yang di-trigger dari _populate_presets) tidak crash
@@ -176,6 +186,7 @@ class MainWindow(QMainWindow):
         self._preview_debounce.timeout.connect(self._refresh_preview_overlays)
         self._apply_style()
         self._check_environment()
+        self._check_youtube_auth()
         self._wire_preview()
 
     # ─── Window Setup ────────────────────────────────────────────────────────
@@ -218,6 +229,7 @@ class MainWindow(QMainWindow):
         inner.addWidget(self._build_separator())
         inner.addWidget(self._build_input_card())
         inner.addWidget(self._build_settings_card())
+        inner.addWidget(self._build_youtube_card())
         inner.addWidget(self._build_add_button())
         inner.addWidget(self._build_queue_card())
         inner.addWidget(self._build_progress_card())
@@ -1077,6 +1089,277 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ─── YouTube Integration Card & Handlers ─────────────────────────────────
+
+    def _build_youtube_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("card")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
+
+        # Header
+        hdr = QHBoxLayout()
+        lbl = QLabel("YOUTUBE AUTO & MANUAL UPLOAD")
+        lbl.setObjectName("section_label")
+        hdr.addWidget(lbl)
+        hdr.addStretch()
+        lay.addLayout(hdr)
+
+        # Status & Auth Row
+        auth_row = QHBoxLayout()
+        auth_row.setSpacing(10)
+
+        self._yt_status_lbl = QLabel("🔴 Belum Login YouTube")
+        self._yt_status_lbl.setObjectName("status_idle")
+        self._yt_status_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self._yt_login_btn = QPushButton("🔑  Login YouTube")
+        self._yt_login_btn.setObjectName("browse_btn")
+        self._yt_login_btn.setCursor(Qt.PointingHandCursor)
+        self._yt_login_btn.clicked.connect(self._on_yt_login_clicked)
+
+        self._yt_logout_btn = QPushButton("🚪  Logout")
+        self._yt_logout_btn.setObjectName("browse_btn")
+        self._yt_logout_btn.setCursor(Qt.PointingHandCursor)
+        self._yt_logout_btn.clicked.connect(self._on_yt_logout_clicked)
+        self._yt_logout_btn.hide()
+
+        auth_row.addWidget(self._yt_status_lbl)
+        auth_row.addWidget(self._yt_login_btn)
+        auth_row.addWidget(self._yt_logout_btn)
+        lay.addLayout(auth_row)
+
+        lay.addWidget(self._build_separator())
+
+        # Options layout
+        opts_layout = QVBoxLayout()
+        opts_layout.setSpacing(8)
+
+        # Auto upload checkbox
+        auto_row = QHBoxLayout()
+        self._yt_auto_upload_check = QCheckBox("Auto Upload Ke YouTube Setelah Render Selesai")
+        self._yt_auto_upload_check.setChecked(False)
+        self._yt_auto_upload_check.setToolTip(
+            "Ketika diaktifkan, video yang selesai dirender dalam antrian akan otomatis diunggah ke YouTube."
+        )
+        auto_row.addWidget(self._yt_auto_upload_check)
+        opts_layout.addLayout(auto_row)
+
+        # Settings row: Privasi & Kategori
+        settings_row = QHBoxLayout()
+        settings_row.setSpacing(8)
+
+        lbl_priv = QLabel("Privasi:")
+        lbl_priv.setObjectName("field_label")
+        self._yt_privacy_combo = QComboBox()
+        self._yt_privacy_combo.addItems(["unlisted", "private", "public"])
+        self._yt_privacy_combo.setCurrentText("unlisted")
+        self._yt_privacy_combo.setToolTip("Pilih status privasi video YouTube (Default: unlisted)")
+
+        lbl_cat = QLabel("Kategori:")
+        lbl_cat.setObjectName("field_label")
+        self._yt_category_combo = QComboBox()
+        for cat_id, cat_name in YOUTUBE_CATEGORIES.items():
+            self._yt_category_combo.addItem(cat_name, cat_id)
+
+        settings_row.addWidget(lbl_priv)
+        settings_row.addWidget(self._yt_privacy_combo)
+        settings_row.addSpacing(12)
+        settings_row.addWidget(lbl_cat)
+        settings_row.addWidget(self._yt_category_combo)
+        settings_row.addStretch()
+
+        opts_layout.addLayout(settings_row)
+
+        # Manual upload row
+        manual_row = QHBoxLayout()
+        manual_row.setSpacing(8)
+
+        self._yt_manual_file_edit = QLineEdit()
+        self._yt_manual_file_edit.setPlaceholderText("Pilih video / hasil render untuk upload manual...")
+        self._yt_manual_file_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        btn_browse_manual = QPushButton("Browse")
+        btn_browse_manual.setObjectName("browse_btn")
+        btn_browse_manual.setCursor(Qt.PointingHandCursor)
+        btn_browse_manual.clicked.connect(self._browse_yt_manual_file)
+
+        self._yt_manual_upload_btn = QPushButton("📤  Upload Manual")
+        self._yt_manual_upload_btn.setObjectName("add_btn")
+        self._yt_manual_upload_btn.setCursor(Qt.PointingHandCursor)
+        self._yt_manual_upload_btn.clicked.connect(self._on_yt_manual_upload_clicked)
+
+        manual_row.addWidget(self._yt_manual_file_edit)
+        manual_row.addWidget(btn_browse_manual)
+        manual_row.addWidget(self._yt_manual_upload_btn)
+
+        opts_layout.addLayout(manual_row)
+
+        lay.addLayout(opts_layout)
+
+        return card
+
+    def _check_youtube_auth(self):
+        """Pemeriksaan status login YouTube saat aplikasi dibuka."""
+        self._yt_check_worker = YouTubeCheckThread()
+        def _on_check(logged_in: bool, info: dict):
+            if logged_in:
+                self._yt_channel_info = info
+                self._yt_creds = self._yt_auth.get_valid_credentials()
+                title = info.get("title", "YouTube Channel")
+                handle = info.get("custom_url", "")
+                display_str = f"🟢 Channel: {title}" + (f" ({handle})" if handle else "")
+                self._yt_status_lbl.setText(display_str)
+                self._yt_status_lbl.setObjectName("status_done")
+                self._yt_login_btn.hide()
+                self._yt_logout_btn.show()
+                self._log(f"[YOUTUBE] Terhubung ke channel: {title}")
+            else:
+                self._yt_status_lbl.setText("🔴 Belum Login YouTube")
+                self._yt_status_lbl.setObjectName("status_idle")
+                self._yt_login_btn.show()
+                self._yt_logout_btn.hide()
+
+            self._yt_status_lbl.style().unpolish(self._yt_status_lbl)
+            self._yt_status_lbl.style().polish(self._yt_status_lbl)
+
+        self._yt_check_worker.finished.connect(_on_check)
+        self._yt_check_worker.start()
+
+    def _on_yt_login_clicked(self):
+        """Handler tombol Login YouTube."""
+        secret_file = self._yt_auth.client_secret_path
+        if not secret_file.exists():
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Pilih File client_secret.json YouTube OAuth",
+                "",
+                "JSON Files (*.json)"
+            )
+            if path:
+                secret_file = Path(path)
+            else:
+                self._log("[YOUTUBE] Login dibatalkan: File client_secret.json diperlukan.")
+                self._set_status("⚠ Memerlukan file client_secret.json dari Google Cloud Console", "error")
+                return
+
+        self._yt_login_btn.setEnabled(False)
+        self._yt_status_lbl.setText("⏳ Membuka browser untuk login...")
+        self._yt_status_lbl.setObjectName("status_running")
+        self._yt_status_lbl.style().unpolish(self._yt_status_lbl)
+        self._yt_status_lbl.style().polish(self._yt_status_lbl)
+        self._log("[YOUTUBE] Memulai otorisasi OAuth di browser...")
+
+        self._yt_auth_worker = YouTubeAuthThread(client_secret_file=str(secret_file))
+        self._yt_auth_worker.auth_started.connect(self._log)
+        self._yt_auth_worker.finished.connect(self._on_yt_auth_finished)
+        self._yt_auth_worker.start()
+
+    def _on_yt_auth_finished(self, success: bool, channel_info: dict, msg: str):
+        """Callback setelah browser OAuth selesai."""
+        self._yt_login_btn.setEnabled(True)
+        if success:
+            self._yt_channel_info = channel_info
+            self._yt_creds = self._yt_auth.get_valid_credentials()
+            title = channel_info.get("title", "YouTube Channel")
+            handle = channel_info.get("custom_url", "")
+            display_str = f"🟢 Channel: {title}" + (f" ({handle})" if handle else "")
+            self._yt_status_lbl.setText(display_str)
+            self._yt_status_lbl.setObjectName("status_done")
+            self._yt_login_btn.hide()
+            self._yt_logout_btn.show()
+            self._log(f"[YOUTUBE] {msg} Channel: {title}")
+        else:
+            self._yt_status_lbl.setText("🔴 Gagal / Belum Login")
+            self._yt_status_lbl.setObjectName("status_error")
+            self._yt_login_btn.show()
+            self._yt_logout_btn.hide()
+            self._log(f"[YOUTUBE ERROR] {msg}")
+
+        self._yt_status_lbl.style().unpolish(self._yt_status_lbl)
+        self._yt_status_lbl.style().polish(self._yt_status_lbl)
+
+    def _on_yt_logout_clicked(self):
+        """Handler tombol Logout YouTube."""
+        self._yt_auth.logout()
+        self._yt_creds = None
+        self._yt_channel_info = None
+        self._yt_status_lbl.setText("🔴 Belum Login YouTube")
+        self._yt_status_lbl.setObjectName("status_idle")
+        self._yt_status_lbl.style().unpolish(self._yt_status_lbl)
+        self._yt_status_lbl.style().polish(self._yt_status_lbl)
+        self._yt_login_btn.show()
+        self._yt_logout_btn.hide()
+        self._log("[YOUTUBE] Logout berhasil. Token dihapus.")
+
+    def _browse_yt_manual_file(self):
+        """Pilih file video untuk upload manual."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Pilih Video untuk Upload YouTube",
+            "",
+            "Video Files (*.mp4 *.mov *.avi *.mkv *.webm)"
+        )
+        if path:
+            self._yt_manual_file_edit.setText(path)
+
+    def _on_yt_manual_upload_clicked(self):
+        """Handler tombol Upload Manual."""
+        file_path = self._yt_manual_file_edit.text().strip()
+        if not file_path:
+            file_path = getattr(self, "_output_path", None)
+        if not file_path or not Path(file_path).exists():
+            self._set_status("⚠ Pilih file video terlebih dahulu untuk upload manual.", "error")
+            return
+        self._start_youtube_upload(file_path)
+
+    def _start_youtube_upload(self, file_path: str, title: str = ""):
+        """Memulai pengungahan video ke YouTube."""
+        if not file_path or not Path(file_path).exists():
+            self._set_status("⚠ File video untuk upload tidak ditemukan.", "error")
+            return
+
+        creds = self._yt_auth.get_valid_credentials()
+        if not creds:
+            self._set_status("⚠ Silakan login ke YouTube terlebih dahulu.", "error")
+            self._log("[YOUTUBE] Upload gagal: Belum terotorisasi/login.")
+            return
+
+        self._yt_creds = creds
+        privacy = self._yt_privacy_combo.currentText()
+        cat_id = self._yt_category_combo.currentData() or "22"
+        if not title:
+            title = Path(file_path).stem.replace("_", " ").title()
+
+        self._yt_manual_upload_btn.setEnabled(False)
+        self._set_status(f"⚙ Uploading ke YouTube: {Path(file_path).name}", "running")
+
+        self._yt_upload_worker = YouTubeUploadThread(
+            creds=creds,
+            file_path=file_path,
+            title=title,
+            privacy_status=privacy,
+            category_id=cat_id,
+        )
+        self._yt_upload_worker.progress.connect(self._on_yt_upload_progress)
+        self._yt_upload_worker.log_message.connect(self._log)
+        self._yt_upload_worker.finished.connect(self._on_yt_upload_finished)
+        self._yt_upload_worker.start()
+
+    def _on_yt_upload_progress(self, pct: float, msg: str):
+        self._progress_bar.setValue(int(pct * 100))
+        self._set_status(f"⚙ {msg}", "running")
+
+    def _on_yt_upload_finished(self, success: bool, result_dict: dict, err_msg: str):
+        self._yt_manual_upload_btn.setEnabled(True)
+        if success:
+            url = result_dict.get("url", "")
+            self._set_status(f"✓ Video berhasil di-upload ke YouTube! Link: {url}", "done")
+            self._log(f"[YOUTUBE SUCCESS] Link: {url}")
+        else:
+            self._set_status(f"✗ Gagal upload YouTube: {err_msg}", "error")
+
     # ─── Add to Queue Button ──────────────────────────────────────────────────
 
 
@@ -1485,6 +1768,17 @@ class MainWindow(QMainWindow):
             self._progress_bar.setValue(100)
             self._log(f"[QUEUE] ✓ Selesai: {result}")
             self._output_path = result
+            if hasattr(self, "_yt_manual_file_edit"):
+                self._yt_manual_file_edit.setText(result)
+
+            # Auto upload ke YouTube jika diaktifkan dan user terautentikasi
+            if hasattr(self, "_yt_auto_upload_check") and self._yt_auto_upload_check.isChecked():
+                if self._yt_creds and self._yt_auth.is_logged_in():
+                    self._log(f"[YOUTUBE AUTO UPLOAD] Memulai upload otomatis untuk {job.name}...")
+                    title = Path(result).stem.replace("_", " ").title()
+                    self._start_youtube_upload(result, title=title)
+                else:
+                    self._log("[YOUTUBE AUTO UPLOAD] ⚠ Auto upload gagal: Belum login ke YouTube.")
         else:
             job.status    = "failed"
             job.error_msg = result
@@ -1585,6 +1879,8 @@ class MainWindow(QMainWindow):
             return []
 
     def closeEvent(self, event):
+        if hasattr(self, "_yt_upload_worker") and self._yt_upload_worker and self._yt_upload_worker.isRunning():
+            self._yt_upload_worker.cancel()
         self._preview.shutdown()
         super().closeEvent(event)
 
